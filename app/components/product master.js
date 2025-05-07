@@ -1,7 +1,7 @@
 // app/productmaster/page.js
 "use client"; // This directive is needed for client-side functionality
 
-import React, { useState, useEffect } from 'react'; // Removed useCallback as it wasn't used
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '../components/button'; // Adjust path as per your project structure
 import { useRouter } from 'next/navigation';
 import Header from '../components/Header'; // Adjust path as per your project structure
@@ -27,6 +27,9 @@ import {
 } from 'lucide-react';
 
 const ProductMasterPage = () => {
+    // Log component render
+    console.log("ProductMasterPage: Component Rendering...");
+
     const [productForm, setProductForm] = useState({
         name: '',
         unit: '',
@@ -43,7 +46,7 @@ const ProductMasterPage = () => {
     const [products, setProducts] = useState([]);
     const [editingProduct, setEditingProduct] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [filteredProducts, setFilteredProducts] = useState([]); // This will now be derived directly in the JSX
+    // filteredProducts is now derived directly in the JSX render section
 
     const predefinedUnits = [
         'Pcs', 'Bottle', 'Strip', 'Box', 'Tube', 'Gm', 'Kg', 'Ml', 'Liter',
@@ -68,6 +71,7 @@ const ProductMasterPage = () => {
 
     // Load products from localStorage on component mount
     useEffect(() => {
+        console.log("ProductMasterPage useEffect: Loading products from localStorage...");
         const storedProducts = localStorage.getItem('products');
         if (storedProducts) {
             try {
@@ -80,83 +84,142 @@ const ProductMasterPage = () => {
                     mrp: Number(product.mrp) || 0,
                     discount: Number(product.discount) || 0,
                     taxRate: Number(product.taxRate) || 0,
-                    quantity: Number(product.quantity) || 0,
+                    quantity: Number(product.quantity) || 0, // Ensure quantity is a number
+                    // Remove transient or irrelevant fields if they somehow got saved
                     hsn: undefined,
                     schedule: undefined,
                     barcode: undefined,
-                    batch: undefined,
+                    batch: undefined, // Batch/Expiry are per purchase/sale, not master
                     expiry: undefined,
-                })).filter(product => product.name);
+                })).filter(product => product.name); // Filter out any entries without a name
+
+                console.log(`ProductMasterPage useEffect: Loaded and parsed ${productsWithFormattedData.length} products.`);
                 setProducts(productsWithFormattedData);
             } catch (error) {
-                console.error("Error loading products from localStorage:", error);
+                console.error("ProductMasterPage useEffect: Error loading products from localStorage:", error);
                 setProducts([]);
                 toast.error("Error loading product data. Local storage might be corrupted.");
             }
         } else {
+            console.log("ProductMasterPage useEffect: No products found in localStorage.");
             setProducts([]);
         }
-    }, []);
 
-    // Handle form input changes
+         // Add event listener for product updates from other pages (e.g., Sales, Purchase)
+         const handleProductsUpdated = () => {
+              console.log("ProductMasterPage: 'productsUpdated' event received. Reloading products.");
+              const updatedStoredProducts = localStorage.getItem('products');
+              if (updatedStoredProducts) {
+                  try {
+                       const parsedProducts = JSON.parse(updatedStoredProducts);
+                       const productsWithFormattedData = parsedProducts.map(product => ({
+                           ...product,
+                           itemsPerPack: Number(product.itemsPerPack) || 1,
+                           minStock: Number(product.minStock) || 0,
+                           maxStock: Number(product.maxStock) || 0,
+                           mrp: Number(product.mrp) || 0,
+                           discount: Number(product.discount) || 0,
+                           taxRate: Number(product.taxRate) || 0,
+                           quantity: Number(product.quantity) || 0,
+                           hsn: undefined, schedule: undefined, barcode: undefined, batch: undefined, expiry: undefined,
+                       })).filter(product => product.name);
+                       setProducts(productsWithFormattedData);
+                       console.log(`ProductMasterPage: Reloaded ${productsWithFormattedData.length} products after update event.`);
+                  } catch (error) {
+                       console.error("ProductMasterPage: Error reloading products after update event:", error);
+                       toast.error("Error reloading product data after update.");
+                  }
+              } else {
+                   setProducts([]);
+                   console.log("ProductMasterPage: No products found after update event.");
+              }
+         };
+
+         window.addEventListener('productsUpdated', handleProductsUpdated);
+
+         // Clean up event listener
+         return () => {
+              console.log("ProductMasterPage useEffect: Cleaning up 'productsUpdated' event listener.");
+              window.removeEventListener('productsUpdated', handleProductsUpdated);
+         };
+
+    }, []); // Empty dependency array ensures this runs only once on mount
+
+    // Handle form input changes - Added more detailed logging
     const handleInputChange = (e) => {
+        // e.persist(); // Potentially helps with synthetic event pooling issues, less common in modern React
         const { name, value } = e.target;
-        setProductForm({ ...productForm, [name]: value });
+        console.log(`handleInputChange: Event received for name="${name}" with value="${value}"`);
+        // console.log("handleInputChange: Event object:", e); // Log the entire event object - Can be noisy
+        // console.log("handleInputChange: Event target:", e.target); // Log the event target element - Can be noisy
+
+        setProductForm(prevForm => {
+            console.log(`handleInputChange: Updating state for "${name}" from "${prevForm[name]}" to "${value}"`);
+            const newForm = { ...prevForm, [name]: value };
+            console.log("handleInputChange: New productForm state:", newForm);
+            return newForm;
+        });
     };
 
     // Validate form data
     const validateForm = () => {
+        console.log("Validating form:", productForm);
         const { name, unit, itemsPerPack, mrp, taxRate, discount, minStock, maxStock } = productForm;
 
         if (!name.trim()) {
-            toast.error('Product Name is required.'); return false;
+            toast.error('Product Name is required.'); console.log("Validation failed: Name empty."); return false;
         }
         if (!unit.trim()) {
-            toast.error('Unit is required.'); return false;
+            toast.error('Unit is required.'); console.log("Validation failed: Unit empty."); return false;
         }
 
         const itemsPerPackNum = Number(itemsPerPack);
         if (itemsPerPack.trim() === '' || isNaN(itemsPerPackNum) || itemsPerPackNum <= 0) {
-            toast.error('Valid "Items per Pack" is required and must be > 0.'); return false;
+            toast.error('Valid "Items per Pack" is required and must be > 0.'); console.log("Validation failed: Invalid Items per Pack."); return false;
         }
 
         const mrpNum = Number(mrp);
         if (mrp.trim() === '' || isNaN(mrpNum) || mrpNum < 0) {
-            toast.error('Valid "MRP" is required and must be >= 0.'); return false;
+            toast.error('Valid "MRP" is required and must be >= 0.'); console.log("Validation failed: Invalid MRP."); return false;
         }
 
         const taxRateNum = Number(taxRate);
         if (taxRate.trim() !== '' && (isNaN(taxRateNum) || taxRateNum < 0 || taxRateNum > 100)) {
-            toast.error('Valid "Tax Rate (%)" must be between 0 and 100 if entered.'); return false;
+            toast.error('Valid "Tax Rate (%)" must be between 0 and 100 if entered.'); console.log("Validation failed: Invalid Tax Rate."); return false;
         }
-        
+
         const discountNum = Number(discount);
         if (discount.trim() !== '' && (isNaN(discountNum) || discountNum < 0 || discountNum > 100)) {
-            toast.error('Valid "Discount (%)" must be between 0 and 100 if entered.'); return false;
+            toast.error('Valid "Discount (%)" must be between 0 and 100 if entered.'); console.log("Validation failed: Invalid Discount."); return false;
         }
 
         const minStockNum = Number(minStock);
          if (minStock.trim() !== '' && (isNaN(minStockNum) || minStockNum < 0)) {
-             toast.error('Minimum Stock must be a non-negative number if entered.');
+             toast.error('Minimum Stock must be a non-negative number if entered.'); console.log("Validation failed: Invalid Min Stock.");
              return false;
          }
 
         const maxStockNum = Number(maxStock);
         if (maxStock.trim() !== '' && (isNaN(maxStockNum) || maxStockNum < 0)) {
-            toast.error('Maximum Stock must be a non-negative number if entered.');
+            toast.error('Maximum Stock must be a non-negative number if entered.'); console.log("Validation failed: Invalid Max Stock.");
             return false;
         }
         if (minStock.trim() !== '' && maxStock.trim() !== '' && minStockNum > maxStockNum) {
-            toast.error('Minimum Stock cannot be greater than Maximum Stock.');
+            toast.error('Minimum Stock cannot be greater than Maximum Stock.'); console.log("Validation failed: Min > Max Stock.");
             return false;
         }
 
+        console.log("Form validation successful.");
         return true;
     };
 
     // Handle adding or updating a product
     const handleSaveProduct = () => {
-        if (!validateForm()) return;
+        console.log("Attempting to save product...");
+        if (!validateForm()) {
+            console.log("Validation failed, save aborted.");
+            return;
+        }
 
         const productData = {
             id: editingProduct ? editingProduct.id : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -170,39 +233,57 @@ const ProductMasterPage = () => {
             mrp: Number(productForm.mrp),
             discount: Number(productForm.discount) || 0,
             taxRate: Number(productForm.taxRate) || 0,
-            quantity: editingProduct ? (editingProduct.quantity || 0) : 0,
+            // Preserve existing quantity if editing, otherwise start at 0
+            quantity: editingProduct ? (Number(editingProduct.quantity) || 0) : 0,
         };
 
         let updatedProducts;
         if (editingProduct) {
+            console.log("Editing existing product:", editingProduct.id);
             const nameConflict = products.some(p =>
                 p.name.toLowerCase() === productData.name.toLowerCase() && p.id !== productData.id
             );
             if (nameConflict) {
                 toast.error(`Another product with the name "${productData.name}" already exists.`);
+                console.log("Name conflict during edit.");
                 return;
             }
             updatedProducts = products.map(p =>
                 p.id === productData.id ? { ...productData, quantity: p.quantity } : p
             );
             toast.success(`Product "${productData.name}" updated successfully!`);
+            console.log("Product updated:", productData);
         } else {
+            console.log("Adding new product.");
             if (products.some(p => p.name.toLowerCase() === productData.name.toLowerCase())) {
                 toast.error(`Product with name "${productData.name}" already exists.`);
+                console.log("Name conflict during add.");
                 return;
             }
             updatedProducts = [...products, productData];
             toast.success(`Product "${productData.name}" added successfully!`);
+            console.log("New product added:", productData);
         }
 
         setProducts(updatedProducts);
-        localStorage.setItem('products', JSON.stringify(updatedProducts));
-        window.dispatchEvent(new Event('productsUpdated'));
+        try {
+            localStorage.setItem('products', JSON.stringify(updatedProducts));
+            console.log("Products saved to localStorage.");
+             // Dispatch event to notify other components that products data has changed
+            window.dispatchEvent(new Event('productsUpdated'));
+            console.log("'productsUpdated' event dispatched.");
+        } catch (error) {
+             console.error("Error saving products to localStorage:", error);
+             toast.error("Error saving product data. Local storage might be full.");
+        }
+
         resetForm();
+        console.log("Form reset after save.");
     };
 
     // Handle editing a product
     const handleEditProduct = (product) => {
+        console.log("Initiating edit for product:", product.name);
         setEditingProduct(product);
         setProductForm({
             name: product.name || '',
@@ -217,11 +298,13 @@ const ProductMasterPage = () => {
             taxRate: String(product.taxRate ?? '') || '',
         });
         window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to top to show the form
+        console.log("Product form populated for editing.");
     };
 
     // Handle deleting a product
     const handleDeleteProduct = (productId, productName) => {
-        // Enhanced confirmation dialog
+         console.log(`Attempting to delete product ID: ${productId}, Name: "${productName}"`);
+        // Enhanced confirmation dialog using Sonner
         toast(
             <div>
                 <p className="font-semibold">Confirm Deletion</p>
@@ -234,71 +317,70 @@ const ProductMasterPage = () => {
                 action: {
                     label: 'Delete',
                     onClick: () => {
+                        console.log("User confirmed deletion.");
                         const updatedProducts = products.filter(p => p.id !== productId);
                         setProducts(updatedProducts);
-                        localStorage.setItem('products', JSON.stringify(updatedProducts));
-                        window.dispatchEvent(new Event('productsUpdated'));
+                        try {
+                            localStorage.setItem('products', JSON.stringify(updatedProducts));
+                            console.log("Products saved to localStorage after deletion.");
+                            window.dispatchEvent(new Event('productsUpdated')); // Dispatch event
+                            console.log("'productsUpdated' event dispatched after deletion.");
+                        } catch (error) {
+                             console.error("Error saving products after deletion to localStorage:", error);
+                             toast.error("Error saving product data after deletion.");
+                        }
                         toast.success(`Product "${productName}" deleted.`);
+                        console.log(`Product "${productName}" deleted successfully.`);
                         if (editingProduct && editingProduct.id === productId) {
                             resetForm();
+                            console.log("Deleted product was being edited. Form reset.");
                         }
                     },
                 },
                 cancel: {
                     label: 'Cancel',
-                    onClick: () => { /* Do nothing */ },
+                    onClick: () => { console.log("Deletion cancelled by user."); /* Do nothing */ },
                 },
                 duration: 10000, // Keep toast longer for confirmation
             }
         );
     };
-    
+
 
     // Reset the form and editing state
     const resetForm = () => {
+        console.log("Resetting product form.");
         setProductForm({
             name: '', unit: '', category: '', company: '', itemsPerPack: '',
             minStock: '', maxStock: '', mrp: '', discount: '', taxRate: '',
         });
         setEditingProduct(null);
+        console.log("Product form reset.");
     };
 
-    // Derived state for filtered products
-    const currentFilteredProducts = products.filter(product => {
+    // Derived state for filtered products - Recalculated whenever products or searchQuery changes
+    const currentFilteredProducts = useMemo(() => { // Used useMemo here
+        console.log("Filtering products based on query:", searchQuery);
         const query = searchQuery.toLowerCase();
-        return (
-            (product.name && product.name.toLowerCase().includes(query)) ||
-            (product.unit && product.unit.toLowerCase().includes(query)) ||
-            (product.category && product.category.toLowerCase().includes(query)) ||
-            (product.company && product.company.toLowerCase().includes(query))
-        );
-    });
+        const filtered = products.filter(product => {
+            // Ensure properties exist before calling toLowerCase
+            const nameMatch = product.name && product.name.toLowerCase().includes(query);
+            const unitMatch = product.unit && product.unit.toLowerCase().includes(query);
+            const categoryMatch = product.category && product.category.toLowerCase().includes(query);
+            const companyMatch = product.company && product.company.toLowerCase().includes(query);
 
-    // Input field component for consistency
-    const FormInput = ({ icon: Icon, name, placeholder, value, onChange, type = "text", list, required, min, max, step, className = "" }) => (
-        <div className={`flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150 ${className}`}>
-            {Icon && <Icon className="h-5 w-5 text-gray-400 mx-3 shrink-0" />}
-            <input
-                type={type}
-                name={name}
-                placeholder={placeholder + (required ? " (Required)" : "")}
-                className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                value={value}
-                onChange={onChange}
-                list={list}
-                required={required}
-                min={min}
-                max={max}
-                step={step}
-            />
-        </div>
-    );
+            return nameMatch || unitMatch || categoryMatch || companyMatch;
+        });
+        console.log("Filtered products count:", filtered.length);
+        return filtered;
+    }, [products, searchQuery]); // Dependencies: products state and searchQuery state
 
 
     return (
         <> {/* Using React Fragment */}
             <Header />
-            <div className="min-h-screen bg-slate-50 p-4 md:p-6 lg:p-8 antialiased text-gray-800">
+            {/* Added fade-in class to the main container */}
+            <div className="min-h-screen bg-slate-50 p-4 md:p-6 lg:p-8 antialiased text-gray-800 fade-in">
                 <div className="container mx-auto">
                     {/* Product Form Section */}
                     <div className="bg-white p-6 rounded-xl shadow-xl mb-8">
@@ -307,28 +389,159 @@ const ProductMasterPage = () => {
                                 <Package className="mr-3 h-7 w-7 text-indigo-600" />
                                 {editingProduct ? 'Edit Product' : 'Add New Product'}
                             </h1>
-                            <Button 
-                                onClick={() => router.push("/")} 
+                            <Button
+                                onClick={() => router.push("/")}
                                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow hover:shadow-md transition-all duration-150 text-sm font-medium flex items-center"
                             >
                                 Go to Dashboard
                             </Button>
                         </div>
-                        
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
-                            <FormInput icon={Tag} name="name" placeholder="Product Name" value={productForm.name} onChange={handleInputChange} required />
-                            <FormInput icon={Ruler} name="unit" placeholder="Unit (e.g., Pcs)" value={productForm.unit} onChange={handleInputChange} list="unit-suggestions" required />
-                            <FormInput icon={List} name="category" placeholder="Category" value={productForm.category} onChange={handleInputChange} list="category-suggestions" />
-                            <FormInput icon={Building2} name="company" placeholder="Company/Manufacturer" value={productForm.company} onChange={handleInputChange} list="company-suggestions" />
-                            <FormInput icon={Boxes} name="itemsPerPack" placeholder="Items per Pack" type="number" min="1" value={productForm.itemsPerPack} onChange={handleInputChange} required />
-                            <FormInput icon={DollarSign} name="mrp" placeholder="MRP (per Item)" type="number" min="0" step="0.01" value={productForm.mrp} onChange={handleInputChange} required />
-                            <FormInput icon={ArrowDownCircle} name="minStock" placeholder="Min Stock (Items)" type="number" min="0" value={productForm.minStock} onChange={handleInputChange} />
-                            <FormInput icon={ArrowUpCircle} name="maxStock" placeholder="Max Stock (Items)" type="number" min="0" value={productForm.maxStock} onChange={handleInputChange} />
-                            <FormInput icon={Percent} name="discount" placeholder="Discount (%)" type="number" min="0" max="100" value={productForm.discount} onChange={handleInputChange} />
-                            <FormInput icon={Scale} name="taxRate" placeholder="Tax Rate (%)" type="number" min="0" max="100" value={productForm.taxRate} onChange={handleInputChange} />
+                            {/* Input fields rendered directly */}
+                            <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <Tag className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="name" // Still using key for consistency
+                                    type="text"
+                                    name="name"
+                                    placeholder="Product Name (Required)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.name}
+                                    onChange={handleInputChange}
+                                    required
+                                    list="product-suggestions" // Re-added list attribute
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <Ruler className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="unit"
+                                    type="text"
+                                    name="unit"
+                                    placeholder="Unit (e.g., Pcs) (Required)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.unit}
+                                    onChange={handleInputChange}
+                                    required
+                                    list="unit-suggestions" // Re-added list attribute
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <List className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="category"
+                                    type="text"
+                                    name="category"
+                                    placeholder="Category"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.category}
+                                    onChange={handleInputChange}
+                                     list="category-suggestions" // Re-added list attribute
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <Building2 className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="company"
+                                    type="text"
+                                    name="company"
+                                    placeholder="Company/Manufacturer"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.company}
+                                    onChange={handleInputChange}
+                                     list="company-suggestions" // Re-added list attribute
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <Boxes className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="itemsPerPack"
+                                    type="number"
+                                    name="itemsPerPack"
+                                    placeholder="Items per Pack (Required)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.itemsPerPack}
+                                    onChange={handleInputChange}
+                                    required
+                                    min="1"
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <DollarSign className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="mrp"
+                                    type="number"
+                                    name="mrp"
+                                    placeholder="MRP (per Item) (Required)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.mrp}
+                                    onChange={handleInputChange}
+                                    required
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <ArrowDownCircle className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="minStock"
+                                    type="number"
+                                    name="minStock"
+                                    placeholder="Min Stock (Items)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.minStock}
+                                    onChange={handleInputChange}
+                                    min="0"
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <ArrowUpCircle className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="maxStock"
+                                    type="number"
+                                    name="maxStock"
+                                    placeholder="Max Stock (Items)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.maxStock}
+                                    onChange={handleInputChange}
+                                    min="0"
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <Percent className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="discount"
+                                    type="number"
+                                    name="discount"
+                                    placeholder="Discount (%)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.discount}
+                                    onChange={handleInputChange}
+                                    min="0"
+                                    max="100"
+                                />
+                            </div>
+                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
+                                <Scale className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <input
+                                    key="taxRate"
+                                    type="number"
+                                    name="taxRate"
+                                    placeholder="Tax Rate (%)"
+                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                                    value={productForm.taxRate}
+                                    onChange={handleInputChange}
+                                    min="0"
+                                    max="100"
+                                />
+                            </div>
                         </div>
 
                         {/* Datalists for suggestions */}
+                        <datalist id="product-suggestions">
+                             {products.map((product, index) => <option key={`prod-sugg-${index}`} value={product.name} />)}
+                         </datalist>
                         <datalist id="unit-suggestions">
                             {predefinedUnits.map((unit, index) => <option key={`unit-${index}`} value={unit} />)}
                         </datalist>
@@ -341,7 +554,7 @@ const ProductMasterPage = () => {
 
                         <div className="flex flex-wrap gap-3 mt-6">
                             <Button onClick={handleSaveProduct} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
-                                {editingProduct ? <Edit className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />} 
+                                {editingProduct ? <Edit className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
                                 {editingProduct ? 'Update Product' : 'Save Product'}
                             </Button>
                             {editingProduct && (
@@ -392,7 +605,8 @@ const ProductMasterPage = () => {
                                 <tbody className="divide-y divide-gray-200 bg-white">
                                     {currentFilteredProducts.length > 0 ? (
                                         currentFilteredProducts.map((product) => (
-                                            <tr key={product.id} className="hover:bg-slate-50 transition-colors duration-150 text-sm text-gray-700">
+                                            // Added fade-in-item class to table rows
+                                            <tr key={product.id} className="hover:bg-slate-50 transition-colors duration-150 text-sm text-gray-700 fade-in-item">
                                                 <td className="px-4 py-3 font-medium whitespace-nowrap">{product.name}</td>
                                                 <td className="px-3 py-3 whitespace-nowrap">{product.unit}</td>
                                                 <td className="px-3 py-3 whitespace-nowrap hidden md:table-cell">{product.category || '-'}</td>
@@ -430,6 +644,24 @@ const ProductMasterPage = () => {
                     </div>
                 </div>
             </div>
+             <style jsx>{`
+                .fade-in {
+                    animation: fadeIn 0.5s ease-out forwards;
+                    opacity: 0;
+                }
+                @keyframes fadeIn {
+                    0% { opacity: 0; transform: translateY(20px); }
+                    100% { opacity: 1; transform: translateY(0); }
+                }
+                 .fade-in-item {
+                    opacity: 0;
+                    animation: fadeInItem 0.5s ease-out forwards;
+                 }
+                @keyframes fadeInItem {
+                    0% { opacity: 0; transform: translateY(10px); }
+                    100% { opacity: 1; transform: translateY(0); }
+                }
+            `}</style>
         </>
     );
 };

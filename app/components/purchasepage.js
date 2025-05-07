@@ -333,14 +333,16 @@ const PurchasePage = () => {
     return (
         <div>
             <Header />
-            <div className="container mx-auto p-6 bg-white shadow-md rounded-lg">
+            {/* Added fade-in class to the main container */}
+            <div className="container mx-auto p-6 bg-white shadow-md rounded-lg fade-in">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-semibold">Purchase Bills</h2>
                     <Button onClick={() => router.push("/")} className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded">Go to Dashboard</Button>
                 </div>
 
                 {/* --- Integrate the reusable ProductSearchAndDetails component --- */}
-                 <div className="mb-6"> {/* Add some spacing around the component */}
+                 {/* Added fade-in-item class */}
+                 <div className="mb-6 fade-in-item"> {/* Add some spacing around the component */}
                      <ProductSearchAndDetails
                          // You can pass props here if the component needs them, e.g.,
                          // onEditProduct={(product) => handleEditProduct(product)}
@@ -350,7 +352,8 @@ const PurchasePage = () => {
 
 
                 {/* --- New Purchase Bill Section --- */}
-                 <div className="mb-6 border p-4 rounded-lg bg-gray-50">
+                 {/* Added fade-in-item class */}
+                 <div className="mb-6 border p-4 rounded-lg bg-gray-50 fade-in-item">
                       <h3 className="text-xl font-semibold mb-3">Add New Purchase Bill</h3>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                          <div>
@@ -534,7 +537,8 @@ const PurchasePage = () => {
                                         </thead>
                                         <tbody>
                                              {currentBill.items.map(item => (
-                                                 <tr key={item.id} className="hover:bg-gray-100">
+                                                 // Added fade-in-item class
+                                                 <tr key={item.id} className="hover:bg-gray-100 fade-in-item">
                                                      <td className="border border-gray-300 px-3 py-2">{item.product}</td>
                                                      <td className="border border-gray-300 px-3 py-2">{item.batch}</td>
                                                      <td className="border border-gray-300 px-3 py-2">{item.expiry}</td>
@@ -589,6 +593,24 @@ const PurchasePage = () => {
 
 
             </div>
+             <style jsx>{`
+                .fade-in {
+                    animation: fadeIn 0.5s ease-out forwards;
+                    opacity: 0;
+                }
+                @keyframes fadeIn {
+                    0% { opacity: 0; transform: translateY(20px); }
+                    100% { opacity: 1; transform: translateY(0); }
+                }
+                 .fade-in-item {
+                    opacity: 0;
+                    animation: fadeInItem 0.5s ease-out forwards;
+                 }
+                @keyframes fadeInItem {
+                    0% { opacity: 0; transform: translateY(10px); }
+                    100% { opacity: 1; transform: translateY(0); }
+                }
+            `}</style>
         </div>
     );
 };
