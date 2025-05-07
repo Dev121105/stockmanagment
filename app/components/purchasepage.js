@@ -64,10 +64,10 @@ const PurchasePage = () => {
         quantity: '', // Number of items purchased (total items in batch/box)
         ptr: '', // Price to Retailer (per pack)
         itemsPerPack: '', // Items per pack for this specific purchase entry
-        // Fields to store from product master or calculate (optional to store here, or derive when adding)
+        // Fields to store from product master or calculate
         unit: '',
         mrp: '',
-        discount: '',
+        discount: '', // Make this editable
         taxRate: '',
         totalItemAmount: 0, // Calculated total for this item line
     });
@@ -143,7 +143,14 @@ const PurchasePage = () => {
     // Handle item form input changes
     const handleItemFormChange = (e) => {
         const { name, value } = e.target;
-        setItemForm({ ...itemForm, [name]: value });
+
+        // Allow changing discount
+        if (name === 'discount' || name === 'quantity' || name === 'ptr' || name === 'itemsPerPack') {
+            setItemForm(prev => ({ ...prev, [name]: value }));
+        } else {
+             setItemForm({ ...itemForm, [name]: value });
+        }
+
 
          // Optional: Auto-fill item form fields based on selected product name from master list
          if (name === 'product' && value.trim()) {
@@ -154,15 +161,15 @@ const PurchasePage = () => {
                       product: productDetails.name, // Use original casing name
                       unit: productDetails.unit,
                       mrp: String(productDetails.mrp),
-                      discount: String(productDetails.discount),
+                      discount: String(productDetails.discount), // Still populate initial discount from master
                       taxRate: String(productDetails.taxRate),
                       itemsPerPack: String(productDetails.itemsPerPack), // Default items per pack from master
                  }));
              } else {
-                 // Clear related fields if product not found
+                 // Clear related fields if product not found (except potentially discount if already entered)
                  setItemForm(prev => ({
                      ...prev,
-                     unit: '', mrp: '', discount: '', taxRate: '', itemsPerPack: '',
+                     unit: '', mrp: '', taxRate: '', itemsPerPack: '', // Keep existing discount
                  }));
              }
          }
@@ -173,10 +180,10 @@ const PurchasePage = () => {
     const handleAddItemToBill = (e) => {
         e.preventDefault(); // Prevent form submission
 
-        const { product, batch, expiry, quantity, ptr, itemsPerPack } = itemForm;
+        const { product, batch, expiry, quantity, ptr, itemsPerPack, discount } = itemForm; // Include discount
 
         // Basic validation for item fields
-        if (!product.trim() || !batch.trim() || !expiry.trim() || quantity === '' || isNaN(Number(quantity)) || Number(quantity) <= 0 || ptr === '' || isNaN(Number(ptr)) || Number(ptr) < 0 || itemsPerPack === '' || isNaN(Number(itemsPerPack)) || Number(itemsPerPack) <= 0) {
+        if (!product.trim() || !batch.trim() || !expiry.trim() || quantity === '' || isNaN(Number(quantity)) || Number(quantity) <= 0 || ptr === '' || isNaN(Number(ptr)) || Number(ptr) < 0 || itemsPerPack === '' || isNaN(Number(itemsPerPack)) || Number(itemsPerPack) <= 0 || discount === '' || isNaN(Number(discount)) || Number(discount) < 0) {
             toast.error('Please fill in all required item details correctly.');
             return;
         }
@@ -192,10 +199,14 @@ const PurchasePage = () => {
          const quantityNum = Number(quantity); // Total items purchased in this line
          const ptrNum = Number(ptr); // Price to Retailer per PACK
          const itemsPerPackNum = Number(itemsPerPack); // Items per pack for *this* purchase entry
+         const discountNum = Number(discount); // Editable discount percentage
 
 
-         // Calculate total amount for this item line: (PTR / ItemsPerPack) * TotalItems
-         const totalItemAmount = (ptrNum / itemsPerPackNum) * quantityNum;
+         // Calculate total amount for this item line including discount:
+         // (PTR / ItemsPerPack) * TotalItems
+         // Apply discount: Total * (1 - discountPercentage / 100)
+         const calculatedItemValueBeforeDiscount = (ptrNum / itemsPerPackNum) * quantityNum;
+         const totalItemAmount = calculatedItemValueBeforeDiscount * (1 - discountNum / 100);
 
 
         const newItem = {
@@ -210,7 +221,7 @@ const PurchasePage = () => {
             // Store other relevant details from product master/form at time of purchase
             unit: productDetails.unit,
             mrp: productDetails.mrp, // Store MRP at time of purchase
-            discount: productDetails.discount, // Store default discount at time of purchase
+            discount: discountNum, // Store the *editable* discount entered
             taxRate: productDetails.taxRate, // Store tax rate at time of purchase
         };
 
@@ -302,7 +313,7 @@ const PurchasePage = () => {
             });
              setItemForm({
                  id: null,
-                 product: '',
+                 product: '', // Clear product name to encourage new selection or re-typing
                  batch: '',
                  expiry: '',
                  quantity: '',
@@ -463,7 +474,7 @@ const PurchasePage = () => {
                                   min="1"
                              />
                          </div>
-                            {/* Displaying auto-populated fields from master data */}
+                            {/* MRP and Tax Rate fields from master data (can remain read-only) */}
                             <div className="col-span-full md:col-span-1">
                                 <label className="block text-sm font-medium text-gray-700">Unit (from Master)</label>
                                 <input type="text" value={itemForm.unit} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-gray-100" readOnly />
@@ -476,9 +487,20 @@ const PurchasePage = () => {
                                  <label className="block text-sm font-medium text-gray-700">Tax (%) (from Master)</label>
                                  <input type="text" value={`${Number(itemForm.taxRate).toFixed(2)}%`} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-gray-100" readOnly />
                              </div>
+                             {/* Make Discount field editable */}
                              <div className="col-span-full md:col-span-1">
-                                 <label className="block text-sm font-medium text-gray-700">Discount (%) (from Master)</label>
-                                 <input type="text" value={`${Number(itemForm.discount).toFixed(2)}%`} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-gray-100" readOnly />
+                                 <label className="block text-sm font-medium text-gray-700">Discount (%)</label>
+                                 <input
+                                     type="number"
+                                     name="discount"
+                                     value={itemForm.discount}
+                                     onChange={handleItemFormChange} // Allow changing discount
+                                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                                      placeholder="Discount %"
+                                     required
+                                      min="0"
+                                      step="0.01"
+                                 />
                              </div>
 
                            <div className="col-span-full flex justify-end">
@@ -504,7 +526,8 @@ const PurchasePage = () => {
                                                  <th className="border border-gray-300 px-3 py-2">Items/Pack</th>
                                                   <th className="border border-gray-300 px-3 py-2">MRP</th>
                                                   <th className="border border-gray-300 px-3 py-2">Tax</th>
-                                                  <th className="border border-gray-300 px-3 py-2">Discount</th>
+                                                 {/* Display editable discount */}
+                                                  <th className="border border-gray-300 px-3 py-2">Discount (%)</th>
                                                  <th className="border border-gray-300 px-3 py-2">Item Total</th>
                                                  <th className="border border-gray-300 px-3 py-2 text-center">Action</th>
                                              </tr>
@@ -520,6 +543,7 @@ const PurchasePage = () => {
                                                      <td className="border border-gray-300 px-3 py-2">{item.itemsPerPack}</td>
                                                       <td className="border border-gray-300 px-3 py-2">₹{Number(item.mrp).toFixed(2)}</td>
                                                       <td className="border border-gray-300 px-3 py-2">{Number(item.taxRate).toFixed(2)}%</td>
+                                                     {/* Display the stored editable discount */}
                                                       <td className="border border-gray-300 px-3 py-2">{Number(item.discount).toFixed(2)}%</td>
                                                      <td className="border border-gray-300 px-3 py-2">₹{Number(item.totalItemAmount).toFixed(2)}</td>
                                                      <td className="border border-gray-300 px-3 py-2 text-center">

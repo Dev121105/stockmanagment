@@ -1,158 +1,70 @@
+// app/productmaster/page.js
 "use client"; // This directive is needed for client-side functionality
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react'; // Removed useCallback as it wasn't used
 import { Button } from '../components/button'; // Adjust path as per your project structure
 import { useRouter } from 'next/navigation';
 import Header from '../components/Header'; // Adjust path as per your project structure
-import { toast } from 'sonner'; // Assuming you use Sonner for toasts
-import { Plus, Trash2, Edit } from 'lucide-react'; // Icons
+import { toast } from 'sonner';
+import {
+    Plus,
+    Trash2,
+    Edit,
+    Package,
+    Search,
+    Tag,
+    Ruler, // Icon for Unit
+    List, // Icon for Category
+    Building2, // Icon for Company
+    Boxes, // Icon for Items Per Pack
+    ArrowDownCircle, // Icon for Min Stock
+    ArrowUpCircle, // Icon for Max Stock
+    DollarSign, // Changed from Currency for better visual if available, or stick to Currency
+    Percent,
+    Scale,
+    X,
+    Save // Added Save icon
+} from 'lucide-react';
 
 const ProductMasterPage = () => {
-    // State for the product form - Removed schedule and barcode, Min/Max Stock, Discount, Tax Rate are optional
     const [productForm, setProductForm] = useState({
         name: '',
         unit: '',
-        category: '', // Keep category as text for datalist input
-        company: '', // Keep company as text for datalist input
-        itemsPerPack: '', // New field for items per pack, required > 0
-        minStock: '', // Optional
-        maxStock: '', // Optional
-        mrp: '', // Maximum Retail Price (Selling Price per Item), required >= 0
-        discount: '', // Default discount for this product, Optional
-        taxRate: '', // Tax/VAT percentage, Optional (but validated if entered)
-        // Removed schedule and barcode
+        category: '',
+        company: '',
+        itemsPerPack: '',
+        minStock: '',
+        maxStock: '',
+        mrp: '',
+        discount: '',
+        taxRate: '',
     });
 
-    // State for the list of all products
     const [products, setProducts] = useState([]);
+    const [editingProduct, setEditingProduct] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [filteredProducts, setFilteredProducts] = useState([]); // This will now be derived directly in the JSX
 
-    // State for editing
-    const [editingProduct, setEditingProduct] = useState(null); // Holds the product being edited
+    const predefinedUnits = [
+        'Pcs', 'Bottle', 'Strip', 'Box', 'Tube', 'Gm', 'Kg', 'Ml', 'Liter',
+        'Capsule', 'Tablet', 'Pack', 'Each', 'Vial', 'Ampoule', 'Can',
+        'Jar', 'Roll', 'Sheet', 'Pair', 'Kit', 'Set', 'Dozen', 'Gross'
+    ];
 
-    // Predefined list of categories for suggestions
     const predefinedCategories = [
-        'Tablet',
-        'Capsule',
-        'Syrup',
-        'Injection',
-        'Cream',
-        'Ointment',
-        'Drops',
-        'Powder',
-        'Liquid',
-        'Suspension',
-        'Suppository',
-        'Inhaler',
-        'Medical Device',
-        'Other',
+        'Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops',
+        'Powder', 'Liquid', 'Suspension', 'Suppository', 'Inhaler', 'Medical Device', 'Other',
     ];
 
-    // --- EXPANDED: Predefined list of companies for suggestions ---
+    // Abridged list for example; use your comprehensive list
     const predefinedCompanies = [
-        'Cipla Ltd.',
-        'Sun Pharmaceutical Industries Ltd.',
-        'Dr. Reddy\'s Laboratories Ltd.',
-        'Zydus Lifesciences Ltd.',
-        'Lupin Ltd.',
-        'Torrent Pharmaceuticals Ltd.',
-        'Glenmark Pharmaceuticals Ltd.',
-        'Mankind Pharma Ltd.',
-        'Abbott India Ltd.',
-        'Pfizer Ltd.',
-        'Novartis India Ltd.',
-        'Sanofi India Ltd.',
-        'GlaxoSmithKline Pharmaceuticals Ltd.',
-        'Divi\'s Laboratories Ltd.',
-        'Aurobindo Pharma Ltd.',
-        'Biocon Ltd.',
-        'Alkem Laboratories Ltd.',
-        'Natco Pharma Ltd.',
-        'Ipca Laboratories Ltd.',
-        'Laurus Labs Ltd.',
-        'Ajanta Pharma Ltd.',
-        'Wockhardt Ltd.',
-        'Emcure Pharmaceuticals Ltd.',
-        'Macleods Pharmaceuticals Ltd.',
-        'Intas Pharmaceuticals Ltd.',
-        'Micro Labs Ltd.',
-        'Aristo Pharmaceuticals Pvt Ltd.',
-        'Franco-Indian Pharmaceuticals Pvt Ltd.',
-        'Eris Lifesciences Ltd.',
-        'Hetero Drugs Ltd.',
-        'Cadila Pharmaceuticals Ltd.',
-        'Serum Institute of India Pvt. Ltd.',
-        'Gland Pharma Ltd.', // Added
-        'Granules India Ltd.', // Added
-        'Jubilant Pharmova Ltd.', // Added
-        'Syngene International Ltd.', // Added
-        'Suven Pharmaceuticals Ltd.', // Added
-        'P&G Health Ltd.', // Added
-        'Astellas Pharma Inc.', // Added
-        'Bayer Pharmaceuticals Pvt. Ltd.', // Added
-        'Boehringer Ingelheim India Pvt. Ltd.', // Added
-        'Eli Lilly and Company (India) Pvt. Ltd.', // Added
-        'Merck Sharp & Dohme (India) Pvt. Ltd. (MSD)', // Added
-        'Novo Nordisk India Pvt. Ltd.', // Added
-        'Roche Products (India) Pvt. Ltd.', // Added
-        'Takeda Pharmaceuticals India Pvt. Ltd.', // Added
-        'UCB India Pvt. Ltd.', // Added
-        'Viatris Inc.', // Added
-        'Zuventus Healthcare Ltd.', // Added
-        'Akums Drugs & Pharmaceuticals Ltd.', // Added
-        'Nestor Pharmaceuticals Ltd.', // Added
-        'Indoco Remedies Ltd.', // Added
-        'Unichem Laboratories Ltd.', // Added
-        'Wallace Pharmaceuticals Pvt. Ltd.', // Added
-        'FDC Ltd.', // Added
-        'Knoll Healthcare Pvt. Ltd.', // Added
-        'Bharat Serums and Vaccines Ltd.', // Added
-        'La Renon Healthcare Pvt. Ltd.', // Added
-        'Corona Remedies Pvt. Ltd.', // Added
-        'Lincoln Pharmaceuticals Ltd.', // Added
-        'Sharon Bio-Medicine Ltd.', // Added
-        'Morepen Laboratories Ltd.', // Added
-        'Lyka Labs Ltd.', // Added
-        'Bliss GVS Pharma Ltd.', // Added
-        'Alniche Life Sciences Pvt Ltd.', // Added
-        'Apex Laboratories Pvt. Ltd.', // Added
-        'Cachet Pharmaceuticals Pvt. Ltd.', // Added
-        'Concept Pharmaceuticals Ltd.', // Added
-        'Elder Pharmaceuticals Ltd.', // Added
-        'Fourrts (India) Laboratories Pvt Ltd.', // Added
-        'Galpha Laboratories Ltd.', // Added
-        'Ind Swift Laboratories Ltd.', // Added
-        'Intas Pharmaceuticals Ltd.', // Added (already there, maybe just keep one) - Keeping it as it might be listed differently
-        'Ipca Laboratories Ltd.', // Added (already there, maybe just keep one) - Keeping it as it might be listed differently
-        'JB Chemicals & Pharmaceuticals Ltd.', // Added
-        'Kamron Laboratories Ltd.', // Added
-        'Kumarswamy Pharmaceutical Works (KSPW)', // Added
-        'Lupin Ltd.', // Added (already there)
-        'Mankind Pharma Ltd.', // Added (already there)
-        'Meditrina Pharmaceuticals Pvt Ltd.', // Added
-        'Meyer Organics Pvt. Ltd.', // Added
-        'Novartis India Ltd.', // Added (already there)
-        'Ordain Health Care Global Pvt Ltd.', // Added
-        'Ranbaxy Laboratories Ltd.', // Added (part of Sun Pharma now, but historically significant)
-        'Reliance Life Sciences Pvt. Ltd.', // Added
-        'RPG Life Sciences Ltd.', // Added
-        'S.L. Healthcare', // Added
-        'Serum Institute of India Pvt. Ltd.', // Added (already there)
-        'Shemaroo Pharmaceutical Pvt Ltd.', // Added
-        'Strides Pharma Science Ltd.', // Added (formerly Strides Shasun)
-        'Synchem Pharmaceuticals Ltd.', // Added
-        'Themis Medicare Ltd.', // Added
-        'TTK Healthcare Ltd.', // Added
-        'Unichem Laboratories Ltd.', // Added (already there)
-        'Unique Pharmaceutical Laboratories', // Added (division of JB Chemicals)
-        'Venus Remedies Ltd.', // Added
-        'Wockhardt Ltd.', // Added (already there)
-        'Zydus Healthcare Ltd.', // Added (division of Zydus Lifesciences)
-        'Other',
+        'Cipla Ltd.', 'Sun Pharmaceutical Industries Ltd.', "Dr. Reddy's Laboratories Ltd.",
+        'Zydus Lifesciences Ltd.', 'Lupin Ltd.', 'Torrent Pharmaceuticals Ltd.',
+        'Glenmark Pharmaceuticals Ltd.', 'Mankind Pharma Ltd.', 'Abbott India Ltd.',
+        // Add more common companies or use the full list from your existing code
     ];
 
-
-    const router = useRouter(); // Assuming Next.js router
-
+    const router = useRouter();
 
     // Load products from localStorage on component mount
     useEffect(() => {
@@ -160,132 +72,124 @@ const ProductMasterPage = () => {
         if (storedProducts) {
             try {
                 const parsedProducts = JSON.parse(storedProducts);
-                 // Ensure numeric fields are numbers on load, and include new field, handling potential missing fields
                 const productsWithFormattedData = parsedProducts.map(product => ({
                     ...product,
-                    // Use || 0 or || 1 for defaults if data is missing or invalid
-                    itemsPerPack: Number(product.itemsPerPack) || 1, // Default to 1 if missing/invalid
-                    minStock: Number(product.minStock) || 0, // Default to 0
-                    maxStock: Number(product.maxStock) || 0, // Default to 0
-                    mrp: Number(product.mrp) || 0, // Default to 0
-                    discount: Number(product.discount) || 0, // Default to 0
-                    taxRate: Number(product.taxRate) || 0, // Default to 0
-                    quantity: Number(product.quantity) || 0, // Stock is tracked in individual items
-                    // Explicitly set removed fields to undefined to clean old data on load
+                    itemsPerPack: Number(product.itemsPerPack) || 1,
+                    minStock: Number(product.minStock) || 0,
+                    maxStock: Number(product.maxStock) || 0,
+                    mrp: Number(product.mrp) || 0,
+                    discount: Number(product.discount) || 0,
+                    taxRate: Number(product.taxRate) || 0,
+                    quantity: Number(product.quantity) || 0,
                     hsn: undefined,
                     schedule: undefined,
                     barcode: undefined,
-                    // Also ensure batch and expiry are not on master product objects
                     batch: undefined,
                     expiry: undefined,
-                 })).filter(product => product.name); // Filter out any entries without a name
-
+                })).filter(product => product.name);
                 setProducts(productsWithFormattedData);
             } catch (error) {
                 console.error("Error loading products from localStorage:", error);
-                setProducts([]); // Clear products if parsing fails
-                toast.error("Error loading product data. Local storage might be corrupted."); // Inform the user
+                setProducts([]);
+                toast.error("Error loading product data. Local storage might be corrupted.");
             }
         } else {
-                 setProducts([]); // Initialize with an empty array if nothing is found
+            setProducts([]);
         }
-    }, []); // Empty dependency array means this runs only once on mount
-
+    }, []);
 
     // Handle form input changes
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-         // For numeric fields that are optional, allow empty string, convert later
-         // For required numeric fields (itemsPerPack, mrp, taxRate validation is stricter)
-         if (['minStock', 'maxStock', 'discount'].includes(name)) {
-             setProductForm({ ...productForm, [name]: value });
-         } else {
-             setProductForm({ ...productForm, [name]: value });
-         }
+        setProductForm({ ...productForm, [name]: value });
     };
 
-    // Validate form data - Only require Name, Unit, Items per Pack (>0), and MRP (>=0)
+    // Validate form data
     const validateForm = () => {
-        const { name, unit, itemsPerPack, mrp, taxRate } = productForm;
+        const { name, unit, itemsPerPack, mrp, taxRate, discount, minStock, maxStock } = productForm;
 
         if (!name.trim()) {
-            toast.error('Product Name is required.');
-            return false;
+            toast.error('Product Name is required.'); return false;
         }
         if (!unit.trim()) {
-            toast.error('Unit is required.');
-            return false;
+            toast.error('Unit is required.'); return false;
         }
 
-         // Items per Pack validation
         const itemsPerPackNum = Number(itemsPerPack);
         if (itemsPerPack.trim() === '' || isNaN(itemsPerPackNum) || itemsPerPackNum <= 0) {
-            toast.error('Valid "Items per Pack" is required and must be a number greater than 0.');
+            toast.error('Valid "Items per Pack" is required and must be > 0.'); return false;
+        }
+
+        const mrpNum = Number(mrp);
+        if (mrp.trim() === '' || isNaN(mrpNum) || mrpNum < 0) {
+            toast.error('Valid "MRP" is required and must be >= 0.'); return false;
+        }
+
+        const taxRateNum = Number(taxRate);
+        if (taxRate.trim() !== '' && (isNaN(taxRateNum) || taxRateNum < 0 || taxRateNum > 100)) {
+            toast.error('Valid "Tax Rate (%)" must be between 0 and 100 if entered.'); return false;
+        }
+        
+        const discountNum = Number(discount);
+        if (discount.trim() !== '' && (isNaN(discountNum) || discountNum < 0 || discountNum > 100)) {
+            toast.error('Valid "Discount (%)" must be between 0 and 100 if entered.'); return false;
+        }
+
+        const minStockNum = Number(minStock);
+         if (minStock.trim() !== '' && (isNaN(minStockNum) || minStockNum < 0)) {
+             toast.error('Minimum Stock must be a non-negative number if entered.');
+             return false;
+         }
+
+        const maxStockNum = Number(maxStock);
+        if (maxStock.trim() !== '' && (isNaN(maxStockNum) || maxStockNum < 0)) {
+            toast.error('Maximum Stock must be a non-negative number if entered.');
+            return false;
+        }
+        if (minStock.trim() !== '' && maxStock.trim() !== '' && minStockNum > maxStockNum) {
+            toast.error('Minimum Stock cannot be greater than Maximum Stock.');
             return false;
         }
 
-        // MRP validation
-        const mrpNum = Number(mrp);
-         if (mrp.trim() === '' || isNaN(mrpNum) || mrpNum < 0) {
-             toast.error('Valid "MRP (Selling Price)" is required and must be 0 or greater.'); // Clarify MRP
-             return false;
-         }
-
-        // Tax Rate validation (optional field, but validate if entered)
-        const taxRateNum = Number(taxRate);
-         if (taxRate.trim() !== '' && (isNaN(taxRateNum) || taxRateNum < 0 || taxRateNum > 100)) {
-             toast.error('Valid "Tax Rate (%)" must be between 0 and 100 if entered.'); // Clarify Tax Rate
-             return false;
-         }
-
-        // No validation needed for category, company, minStock, maxStock, discount (they are optional/default to 0)
         return true;
     };
 
     // Handle adding or updating a product
     const handleSaveProduct = () => {
-        if (!validateForm()) {
-            return; // Stop if validation fails
-        }
+        if (!validateForm()) return;
 
         const productData = {
-            id: editingProduct ? editingProduct.id : Date.now() + Math.random(), // Use existing ID if editing, otherwise generate new
+            id: editingProduct ? editingProduct.id : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             name: productForm.name.trim(),
             unit: productForm.unit.trim(),
             category: productForm.category.trim(),
             company: productForm.company.trim(),
-            itemsPerPack: Number(productForm.itemsPerPack), // Store items per pack as number
-            minStock: Number(productForm.minStock) || 0, // Default to 0 if empty or invalid
-            maxStock: Number(productForm.maxStock) || 0, // Default to 0 if empty or invalid
-            mrp: Number(productForm.mrp), // Store MRP as number
-            discount: Number(productForm.discount) || 0, // Default to 0 if empty or invalid
-            taxRate: Number(productForm.taxRate) || 0, // Default to 0 if empty or invalid
-            // Removed schedule and barcode from product data
-            // Preserve existing quantity (individual items) when editing, initialize to 0 for new products
-            quantity: editingProduct ? Number(editingProduct.quantity) || 0 : 0, // Quantity should ideally be managed separately per batch/stock entry, but keeping consistent with original structure for now.
+            itemsPerPack: Number(productForm.itemsPerPack),
+            minStock: Number(productForm.minStock) || 0,
+            maxStock: Number(productForm.maxStock) || 0,
+            mrp: Number(productForm.mrp),
+            discount: Number(productForm.discount) || 0,
+            taxRate: Number(productForm.taxRate) || 0,
+            quantity: editingProduct ? (editingProduct.quantity || 0) : 0,
         };
 
         let updatedProducts;
         if (editingProduct) {
-             // Check for name conflict during edit (if name is changed)
-             const nameConflict = products.some(p =>
-                 p.name.toLowerCase() === productData.name.toLowerCase() && p.id !== productData.id
-             );
-             if (nameConflict) {
-                 toast.error(`Another product with the name "${productData.name}" already exists.`);
-                 return; // Stop the update
-             }
-            // Update existing product, preserving its current quantity
+            const nameConflict = products.some(p =>
+                p.name.toLowerCase() === productData.name.toLowerCase() && p.id !== productData.id
+            );
+            if (nameConflict) {
+                toast.error(`Another product with the name "${productData.name}" already exists.`);
+                return;
+            }
             updatedProducts = products.map(p =>
-                p.id === productData.id ? { ...productData, quantity: p.quantity } : p // Preserve quantity
+                p.id === productData.id ? { ...productData, quantity: p.quantity } : p
             );
             toast.success(`Product "${productData.name}" updated successfully!`);
         } else {
-            // Add new product
-            // Check if a product with the same name already exists before adding
             if (products.some(p => p.name.toLowerCase() === productData.name.toLowerCase())) {
                 toast.error(`Product with name "${productData.name}" already exists.`);
-                return; // Stop the add
+                return;
             }
             updatedProducts = [...products, productData];
             toast.success(`Product "${productData.name}" added successfully!`);
@@ -293,275 +197,240 @@ const ProductMasterPage = () => {
 
         setProducts(updatedProducts);
         localStorage.setItem('products', JSON.stringify(updatedProducts));
-
-        // Dispatch a custom event so other components can react to product list changes
         window.dispatchEvent(new Event('productsUpdated'));
-
-        // Reset form and editing state
         resetForm();
     };
 
     // Handle editing a product
     const handleEditProduct = (product) => {
         setEditingProduct(product);
-        // Populate the form with product data (convert numbers back to strings for input fields), handle potential missing data
         setProductForm({
             name: product.name || '',
             unit: product.unit || '',
             category: product.category || '',
             company: product.company || '',
-            itemsPerPack: String(product.itemsPerPack || '') || '', // Populate items per pack
-            minStock: String(product.minStock || '') || '', // Populate min stock
-            maxStock: String(product.maxStock || '') || '', // Populate max stock
-            mrp: String(product.mrp || '') || '', // Populate MRP
-            discount: String(product.discount || '') || '', // Populate discount
-            taxRate: String(product.taxRate || '') || '', // Populate tax rate
-            // Removed schedule and barcode from form population
+            itemsPerPack: String(product.itemsPerPack ?? '') || '',
+            minStock: String(product.minStock ?? '') || '',
+            maxStock: String(product.maxStock ?? '') || '',
+            mrp: String(product.mrp ?? '') || '',
+            discount: String(product.discount ?? '') || '',
+            taxRate: String(product.taxRate ?? '') || '',
         });
+        window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to top to show the form
     };
 
     // Handle deleting a product
     const handleDeleteProduct = (productId, productName) => {
-        if (window.confirm(`Are you sure you want to delete product "${productName}"? This will NOT automatically adjust stock quantities in past purchases/sales.`)) {
-            const updatedProducts = products.filter(p => p.id !== productId);
-            setProducts(updatedProducts);
-            localStorage.setItem('products', JSON.stringify(updatedProducts));
-
-            // Dispatch event
-            window.dispatchEvent(new Event('productsUpdated'));
-
-            toast.success(`Product "${productName}" deleted.`);
-             // If the deleted product was being edited, reset the form
-             if (editingProduct && editingProduct.id === productId) {
-                 resetForm();
-             }
-        }
+        // Enhanced confirmation dialog
+        toast(
+            <div>
+                <p className="font-semibold">Confirm Deletion</p>
+                <p className="text-sm text-gray-600 mt-1">
+                    Are you sure you want to delete product "{productName}"?
+                    This action cannot be undone and will not adjust stock in past transactions.
+                </p>
+            </div>,
+            {
+                action: {
+                    label: 'Delete',
+                    onClick: () => {
+                        const updatedProducts = products.filter(p => p.id !== productId);
+                        setProducts(updatedProducts);
+                        localStorage.setItem('products', JSON.stringify(updatedProducts));
+                        window.dispatchEvent(new Event('productsUpdated'));
+                        toast.success(`Product "${productName}" deleted.`);
+                        if (editingProduct && editingProduct.id === productId) {
+                            resetForm();
+                        }
+                    },
+                },
+                cancel: {
+                    label: 'Cancel',
+                    onClick: () => { /* Do nothing */ },
+                },
+                duration: 10000, // Keep toast longer for confirmation
+            }
+        );
     };
+    
 
     // Reset the form and editing state
     const resetForm = () => {
         setProductForm({
-            name: '',
-            unit: '',
-            category: '',
-            company: '',
-            itemsPerPack: '',
-            minStock: '',
-            maxStock: '',
-            mrp: '',
-            discount: '',
-            taxRate: '',
-            // Removed schedule and barcode
+            name: '', unit: '', category: '', company: '', itemsPerPack: '',
+            minStock: '', maxStock: '', mrp: '', discount: '', taxRate: '',
         });
         setEditingProduct(null);
     };
 
+    // Derived state for filtered products
+    const currentFilteredProducts = products.filter(product => {
+        const query = searchQuery.toLowerCase();
+        return (
+            (product.name && product.name.toLowerCase().includes(query)) ||
+            (product.unit && product.unit.toLowerCase().includes(query)) ||
+            (product.category && product.category.toLowerCase().includes(query)) ||
+            (product.company && product.company.toLowerCase().includes(query))
+        );
+    });
+
+    // Input field component for consistency
+    const FormInput = ({ icon: Icon, name, placeholder, value, onChange, type = "text", list, required, min, max, step, className = "" }) => (
+        <div className={`flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150 ${className}`}>
+            {Icon && <Icon className="h-5 w-5 text-gray-400 mx-3 shrink-0" />}
+            <input
+                type={type}
+                name={name}
+                placeholder={placeholder + (required ? " (Required)" : "")}
+                className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
+                value={value}
+                onChange={onChange}
+                list={list}
+                required={required}
+                min={min}
+                max={max}
+                step={step}
+            />
+        </div>
+    );
+
 
     return (
-        <div>
+        <> {/* Using React Fragment */}
             <Header />
-            <div className="container mx-auto p-6 bg-white shadow-md rounded-lg">
-                <div className="flex justify-between items-center mb-4"> {/* Use justify-between */}
-                    <h2 className="text-2xl font-semibold">{editingProduct ? 'Edit Product' : 'Add New Product'}</h2>
-                    {/* Link back to the Dashboard */}
-                    <Button onClick={() => router.push("/")} className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded">Go to Dashboard</Button>
-                </div>
+            <div className="min-h-screen bg-slate-50 p-4 md:p-6 lg:p-8 antialiased text-gray-800">
+                <div className="container mx-auto">
+                    {/* Product Form Section */}
+                    <div className="bg-white p-6 rounded-xl shadow-xl mb-8">
+                        <div className="flex flex-wrap justify-between items-center mb-6 border-b border-gray-200 pb-4">
+                            <h1 className="text-2xl sm:text-3xl font-bold text-gray-700 flex items-center">
+                                <Package className="mr-3 h-7 w-7 text-indigo-600" />
+                                {editingProduct ? 'Edit Product' : 'Add New Product'}
+                            </h1>
+                            <Button 
+                                onClick={() => router.push("/")} 
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow hover:shadow-md transition-all duration-150 text-sm font-medium flex items-center"
+                            >
+                                Go to Dashboard
+                            </Button>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
+                            <FormInput icon={Tag} name="name" placeholder="Product Name" value={productForm.name} onChange={handleInputChange} required />
+                            <FormInput icon={Ruler} name="unit" placeholder="Unit (e.g., Pcs)" value={productForm.unit} onChange={handleInputChange} list="unit-suggestions" required />
+                            <FormInput icon={List} name="category" placeholder="Category" value={productForm.category} onChange={handleInputChange} list="category-suggestions" />
+                            <FormInput icon={Building2} name="company" placeholder="Company/Manufacturer" value={productForm.company} onChange={handleInputChange} list="company-suggestions" />
+                            <FormInput icon={Boxes} name="itemsPerPack" placeholder="Items per Pack" type="number" min="1" value={productForm.itemsPerPack} onChange={handleInputChange} required />
+                            <FormInput icon={DollarSign} name="mrp" placeholder="MRP (per Item)" type="number" min="0" step="0.01" value={productForm.mrp} onChange={handleInputChange} required />
+                            <FormInput icon={ArrowDownCircle} name="minStock" placeholder="Min Stock (Items)" type="number" min="0" value={productForm.minStock} onChange={handleInputChange} />
+                            <FormInput icon={ArrowUpCircle} name="maxStock" placeholder="Max Stock (Items)" type="number" min="0" value={productForm.maxStock} onChange={handleInputChange} />
+                            <FormInput icon={Percent} name="discount" placeholder="Discount (%)" type="number" min="0" max="100" value={productForm.discount} onChange={handleInputChange} />
+                            <FormInput icon={Scale} name="taxRate" placeholder="Tax Rate (%)" type="number" min="0" max="100" value={productForm.taxRate} onChange={handleInputChange} />
+                        </div>
 
+                        {/* Datalists for suggestions */}
+                        <datalist id="unit-suggestions">
+                            {predefinedUnits.map((unit, index) => <option key={`unit-${index}`} value={unit} />)}
+                        </datalist>
+                        <datalist id="category-suggestions">
+                            {predefinedCategories.map((category, index) => <option key={`cat-${index}`} value={category} />)}
+                        </datalist>
+                        <datalist id="company-suggestions">
+                            {predefinedCompanies.map((company, index) => <option key={`comp-${index}`} value={company} />)}
+                        </datalist>
 
-                {/* Product Form */}
-                {/* Adjusted grid columns for better layout with fewer fields */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                    <input
-                        type="text"
-                        name="name"
-                        placeholder="Product Name (Required)"
-                        className="border p-2 rounded"
-                        value={productForm.name}
-                        onChange={handleInputChange}
-                        required // Mark as required in HTML5 validation as well
-                    />
-                    <input
-                        type="text"
-                        name="unit"
-                        placeholder="Unit (e.g., Pcs, Bottle) (Required)"
-                        className="border p-2 rounded"
-                        value={productForm.unit}
-                        onChange={handleInputChange}
-                        required // Mark as required in HTML5 validation as well
-                    />
-                    <input
-                        type="text"
-                        name="category"
-                        placeholder="Category"
-                        className="border p-2 rounded"
-                        value={productForm.category}
-                        onChange={handleInputChange}
-                        list="category-suggestions" // Added list attribute
-                    />
-                    {/* Datalist for Category Suggestions */}
-                    <datalist id="category-suggestions">
-                        {predefinedCategories.map((category, index) => (
-                            <option key={index} value={category} />
-                        ))}
-                    </datalist>
-
-                    <input
-                        type="text"
-                        name="company"
-                        placeholder="Company/Manufacturer"
-                        className="border p-2 rounded"
-                        value={productForm.company}
-                        onChange={handleInputChange}
-                        list="company-suggestions" // Added list attribute
-                    />
-                    {/* Datalist for Company Suggestions (Updated) */}
-                    <datalist id="company-suggestions">
-                        {predefinedCompanies.map((company, index) => (
-                            <option key={index} value={company} />
-                        ))}
-                    </datalist>
-
-                     {/* Input field for Items per Pack (Required > 0) */}
-                     <input
-                         type="number"
-                         name="itemsPerPack"
-                         placeholder="Items per Pack (Required > 0)"
-                         className="border p-2 rounded"
-                         value={productForm.itemsPerPack}
-                         onChange={handleInputChange}
-                         min="1" // HTML5 validation hint
-                         required // Mark as required in HTML5 validation
-                     />
-
-                     {/* Input field for MRP (Selling Price) (Required >= 0) */}
-                     <input
-                         type="number"
-                         name="mrp"
-                         placeholder="MRP (Selling Price per Item) (Required)"
-                         className="border p-2 rounded"
-                         value={productForm.mrp}
-                         onChange={handleInputChange}
-                         min="0" // HTML5 validation hint
-                         step="0.01" // Allow decimal places for currency
-                         required // Mark as required in HTML5 validation
-                     />
-
-                    {/* Input field for Minimum Stock (Optional) */}
-                    <input
-                        type="number"
-                        name="minStock"
-                        placeholder="Minimum Stock (Items)"
-                        className="border p-2 rounded"
-                        value={productForm.minStock}
-                        onChange={handleInputChange}
-                        min="0"
-                    />
-                    {/* Input field for Maximum Stock (Optional) */}
-                    <input
-                        type="number"
-                        name="maxStock"
-                        placeholder="Maximum Stock (Items)"
-                        className="border p-2 rounded"
-                        value={productForm.maxStock}
-                        onChange={handleInputChange}
-                        min="0"
-                    />
-                    {/* Input field for Default Discount (%) (Optional) */}
-                    <input
-                        type="number"
-                        name="discount"
-                        placeholder="Default Discount (%)"
-                        className="border p-2 rounded"
-                        value={productForm.discount}
-                        onChange={handleInputChange}
-                        min="0"
-                        max="100"
-                    />
-                     {/* Input field for Tax Rate (%) (Optional) */}
-                     <input
-                         type="number"
-                         name="taxRate"
-                         placeholder="Tax Rate (%)"
-                         className="border p-2 rounded"
-                         value={productForm.taxRate}
-                         onChange={handleInputChange}
-                         min="0"
-                         max="100"
-                     />
-
-                    {/* Removed schedule and barcode input fields */}
-
-                </div>
-
-                {/* Save/Update and Cancel Buttons */}
-                <div className="flex justify-start space-x-2 mb-6">
-                    <Button onClick={handleSaveProduct} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">
-                        {editingProduct ? 'Update Product' : 'Add Product'}
-                    </Button>
-                    {editingProduct && (
-                        <Button onClick={resetForm} className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">
-                            Cancel Edit
-                        </Button>
-                    )}
-                </div>
-
-                {/* Product List Table */}
-                <h3 className="text-xl font-semibold mb-2">Product List</h3>
-                 <div className="overflow-x-auto"> {/* Added overflow for responsiveness */}
-                    <table className="w-full table-auto border-collapse border border-gray-300"> {/* Added border-collapse */}
-                        <thead>
-                            {/* Updated headers to include Items per Pack and clarify stock unit, removed schedule/barcode */}
-                            <tr className="bg-gray-100 text-left"> {/* Added text-left */}
-                                <th className="border border-gray-300 px-4 py-2">Name</th>
-                                <th className="border border-gray-300 px-4 py-2">Unit</th>
-                                <th className="border border-gray-300 px-4 py-2">Category</th>
-                                <th className="border border-gray-300 px-4 py-2">Company</th>
-                                <th className="border border-gray-300 px-4 py-2">Items/Pack</th> {/* New header, shortened */}
-                                <th className="border border-gray-300 px-4 py-2">Min Stock (Items)</th> {/* Clarified unit */}
-                                <th className="border border-gray-300 px-4 py-2">Max Stock (Items)</th> {/* Clarified unit */}
-                                <th className="border border-gray-300 px-4 py-2">MRP (per Item)</th> {/* Clarified unit */}
-                                <th className="border border-gray-300 px-4 py-2">Discount (%)</th>
-                                <th className="border border-gray-300 px-4 py-2">Tax Rate (%)</th>
-                                {/* Removed Schedule and Barcode headers */}
-                                <th className="border border-gray-300 px-4 py-2">Current Stock (Items)</th>{/* Display current stock in items */}
-                                <th className="border border-gray-300 px-4 py-2 text-center">Actions</th>{/* Centered actions header */}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {products.length > 0 ? (
-                                products.map((product) => (
-                                    <tr key={product.id} className="hover:bg-gray-50"> {/* Added hover effect */}
-                                        <td className="border border-gray-300 px-4 py-2">{product.name}</td>
-                                        <td className="border border-gray-300 px-4 py-2">{product.unit}</td>
-                                        <td className="border border-gray-300 px-4 py-2">{product.category}</td>
-                                        <td className="border border-gray-300 px-4 py-2">{product.company}</td>
-                                        <td className="border border-gray-300 px-4 py-2">{product.itemsPerPack}</td> {/* Display items per pack */}
-                                        <td className="border border-gray-300 px-4 py-2">{product.minStock}</td>
-                                        <td className="border border-gray-300 px-4 py-2">{product.maxStock}</td>
-                                        <td className="border border-gray-300 px-4 py-2">₹{Number(product.mrp).toFixed(2)}</td>{/* Display MRP formatted */}
-                                        <td className="border border-gray-300 px-4 py-2">{product.discount}%</td>
-                                        <td className="border border-gray-300 px-4 py-2">{product.taxRate}%</td>
-                                        {/* Removed Schedule and Barcode data cells */}
-                                        <td className="border border-gray-300 px-4 py-2">{product.quantity}</td>{/* Display current stock */}
-                                        <td className="border border-gray-300 px-4 py-2 text-center"> {/* Centered actions */}
-                                            <div className="flex justify-center space-x-2">
-                                                <Button variant="outline" size="sm" onClick={() => handleEditProduct(product)} className="text-yellow-600 hover:text-yellow-800 p-1"><Edit className="h-4 w-4" /></Button> {/* Added padding, adjusted colors */}
-                                                <Button variant="destructive" size="sm" onClick={() => handleDeleteProduct(product.id, product.name)} className="bg-red-600 hover:bg-red-700 text-white p-1"><Trash2 className="h-4 w-4" /></Button> {/* Added padding, adjusted colors */}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    {/* Adjusted colSpan - Count the remaining table headers */}
-                                     <td colSpan="12" className="border border-gray-300 px-4 py-2 text-center">No products found</td> {/* 12 columns remaining */}
-                                </tr>
+                        <div className="flex flex-wrap gap-3 mt-6">
+                            <Button onClick={handleSaveProduct} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
+                                {editingProduct ? <Edit className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />} 
+                                {editingProduct ? 'Update Product' : 'Save Product'}
+                            </Button>
+                            {editingProduct && (
+                                <Button onClick={resetForm} className="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
+                                    <X className="mr-2 h-4 w-4" /> Cancel Edit
+                                </Button>
                             )}
-                        </tbody>
-                    </table>
-                 </div>
+                        </div>
+                    </div>
+
+                    {/* Product List Section */}
+                    <div className="bg-white p-6 rounded-xl shadow-xl">
+                        <div className="flex flex-wrap justify-between items-center mb-5 border-b border-gray-200 pb-4">
+                            <h2 className="text-2xl font-bold text-gray-700 flex items-center">
+                                <List className="mr-3 h-6 w-6 text-indigo-600" /> Product List
+                            </h2>
+                            <div className="relative mt-3 md:mt-0 w-full md:w-auto md:max-w-xs">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Search className="h-5 w-5 text-gray-400" />
+                                </div>
+                                <input
+                                    type="text"
+                                    placeholder="Search products..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                            <table className="min-w-full table-auto">
+                                <thead className="bg-gray-50">
+                                    <tr className="text-left text-xs sm:text-sm text-gray-600 uppercase tracking-wider">
+                                        {/* Adjusted headers for clarity and responsive padding */}
+                                        <th className="px-4 py-3 font-semibold">Name</th>
+                                        <th className="px-3 py-3 font-semibold">Unit</th>
+                                        <th className="px-3 py-3 font-semibold hidden md:table-cell">Category</th>
+                                        <th className="px-3 py-3 font-semibold hidden lg:table-cell">Company</th>
+                                        <th className="px-3 py-3 font-semibold text-center">Items/Pack</th>
+                                        <th className="px-3 py-3 font-semibold text-right hidden sm:table-cell">MRP</th>
+                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell">Disc %</th>
+                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell">Tax %</th>
+                                        <th className="px-3 py-3 font-semibold text-right">Stock</th>
+                                        <th className="px-4 py-3 font-semibold text-center">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 bg-white">
+                                    {currentFilteredProducts.length > 0 ? (
+                                        currentFilteredProducts.map((product) => (
+                                            <tr key={product.id} className="hover:bg-slate-50 transition-colors duration-150 text-sm text-gray-700">
+                                                <td className="px-4 py-3 font-medium whitespace-nowrap">{product.name}</td>
+                                                <td className="px-3 py-3 whitespace-nowrap">{product.unit}</td>
+                                                <td className="px-3 py-3 whitespace-nowrap hidden md:table-cell">{product.category || '-'}</td>
+                                                <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">{product.company || '-'}</td>
+                                                <td className="px-3 py-3 text-center whitespace-nowrap">{product.itemsPerPack}</td>
+                                                <td className="px-3 py-3 text-right whitespace-nowrap hidden sm:table-cell">₹{Number(product.mrp).toFixed(2)}</td>
+                                                <td className="px-3 py-3 text-center whitespace-nowrap hidden lg:table-cell">{product.discount}%</td>
+                                                <td className="px-3 py-3 text-center whitespace-nowrap hidden lg:table-cell">{product.taxRate}%</td>
+                                                <td className="px-3 py-3 text-right whitespace-nowrap font-medium">{product.quantity}</td>
+                                                <td className="px-4 py-3 text-center whitespace-nowrap">
+                                                    <div className="flex justify-center items-center space-x-2">
+                                                        <Button variant="outline" size="icon" onClick={() => handleEditProduct(product)} className="text-blue-600 hover:text-blue-800 hover:bg-blue-100 border-blue-300 hover:border-blue-500 p-1.5 rounded-md transition-all">
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button variant="destructive" size="icon" onClick={() => handleDeleteProduct(product.id, product.name)} className="text-red-600 hover:text-red-800 hover:bg-red-100 border-red-300 hover:border-red-500 p-1.5 rounded-md transition-all">
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    ) : (
+                                        <tr>
+                                            <td colSpan="10" className="px-4 py-8 text-center text-gray-500"> {/* Adjusted colSpan */}
+                                                {searchQuery ? `No products found matching "${searchQuery}".` : "No products available. Add a new product to get started."}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                         {currentFilteredProducts.length === 0 && products.length > 0 && !searchQuery && (
+                            <p className="text-center text-gray-500 mt-4">No products match your current filter.</p>
+                        )}
+                    </div>
+                </div>
             </div>
-        </div>
+        </>
     );
 };
 

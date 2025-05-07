@@ -6,7 +6,8 @@ import { Button } from '../components/button'; // Adjust path as per your projec
 import { useRouter } from 'next/navigation';
 import Header from '../components/Header'; // Adjust path as per your project structure
 import { toast } from 'sonner'; // Assuming you use Sonner for toasts
-import { Trash2, Eye, Plus, X, Edit } from 'lucide-react'; // Importing necessary icons
+import { Trash2, Eye, Plus, X, Edit, Save } from 'lucide-react'; // Importing necessary icons, added Save
+
 
 // Helper function to format date as DD-MM-YYYY
 function formatDate(date) {
@@ -1165,378 +1166,446 @@ const SalesPage = () => {
     return (
         <div>
             <Header />
-            <div className="container mx-auto p-6 bg-white shadow-md rounded-lg">
-                <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-2xl font-semibold">{editingBill ? 'Edit Sales Bill' : 'New Sales Entry'}</h2>
-                    <Button onClick={() => router.push("/")} className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded">Go to Dashboard</Button>
+             <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 bg-gray-100 rounded-lg shadow-inner"> {/* Enhanced container styling with inner shadow */}
+                <div className="flex justify-between items-center mb-8"> {/* Increased bottom margin */}
+                    <h2 className="text-3xl font-bold text-gray-800">{editingBill ? 'Edit Sales Bill' : 'New Sales Entry'}</h2> {/* Larger, bolder heading */}
+                    <Button
+                        onClick={() => router.push("/")}
+                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors duration-200" // Styled button
+                    >
+                        Go to Dashboard
+                    </Button>
                 </div>
 
                 {/* Sales Bill Form */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <input
-                        type="text"
-                        placeholder="Bill/Invoice Number (Required)"
-                        value={billNumber}
-                        onChange={(e) => setBillNumber(e.target.value)}
-                        className="border p-2 rounded"
-                        required
-                    />
-                    <input
-                        type="text"
-                        placeholder="Customer Name (Required)"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        className="border p-2 rounded"
-                         list="customer-suggestions" // Add datalist for customer suggestions
-                        required
-                    />
-                     {/* Datalist for Customer Suggestions */}
-                     <datalist id="customer-suggestions">
-                         {getCustomerSuggestions(customerName).map((customer, index) => (
-                             <option key={index} value={customer} />
-                         ))}
-                     </datalist>
+                 <div className="bg-white p-6 rounded-lg shadow-md mb-8 border border-gray-200"> {/* Card-like form section with border */}
+                      <h3 className="text-2xl font-semibold text-gray-700 mb-5 border-b pb-3 border-gray-200"> {/* Subheading with bottom border */}
+                           {editingBill ? 'Edit Bill Details' : 'Bill Details'}
+                       </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6"> {/* Increased gap */}
+                         <div>
+                             <label htmlFor="billNumber" className="block text-sm font-medium text-gray-700 mb-1">Bill/Invoice Number (Required)</label> {/* Added labels */}
+                             <input
+                                 id="billNumber"
+                                 type="text"
+                                 placeholder="Enter Bill/Invoice Number" // More descriptive placeholder
+                                 value={billNumber}
+                                 onChange={(e) => setBillNumber(e.target.value)}
+                                 className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out text-gray-800 placeholder-gray-400" // Styled input with text color and placeholder color
+                                 required
+                             />
+                         </div>
+                           <div>
+                             <label htmlFor="customerName" className="block text-sm font-medium text-gray-700 mb-1">Customer Name (Required)</label> {/* Added labels */}
+                             <input
+                                 id="customerName"
+                                 type="text"
+                                 placeholder="Enter Customer Name" // More descriptive placeholder
+                                 value={customerName}
+                                 onChange={(e) => setCustomerName(e.target.value)}
+                                 className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out text-gray-800 placeholder-gray-400" // Styled input
+                                  list="customer-suggestions" // Add datalist for customer suggestions
+                                 required
+                             />
+                              {/* Datalist for Customer Suggestions */}
+                              <datalist id="customer-suggestions">
+                                  {getCustomerSuggestions(customerName).map((customer, index) => (
+                                      <option key={index} value={customer} />
+                                  ))}
+                              </datalist>
+                         </div>
 
-                    <input
-                        type="text" // Using text allows DD-MM-YYYY format input
-                        placeholder="Bill Date (DD-MM-YYYY)"
-                        value={date}
-                        onChange={handleDateChange}
-                        className="border p-2 rounded"
-                        required
-                        // Consider adding pattern validation or using type="date"
-                    />
-                </div>
+                           <div>
+                             <label htmlFor="billDate" className="block text-sm font-medium text-gray-700 mb-1">Bill Date (DD-MM-YYYY)</label> {/* Added labels */}
+                             <input
+                                 id="billDate"
+                                 type="text" // Keeping text for DD-MM-YYYY format input
+                                 placeholder="e.g., 01-01-2023" // Hint for format
+                                 value={date}
+                                 onChange={handleDateChange}
+                                 className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out text-gray-800 placeholder-gray-400" // Styled input
+                                 required
+                                 // Consider adding pattern="\d{2}-\d{2}-\d{4}" for HTML5 validation hint
+                             />
+                         </div>
+                      </div>
 
-                {/* Sales Items Table */}
-                <h3 className="text-xl font-semibold mb-2">Sales Items</h3>
-                 <div className="overflow-x-auto mb-4">
-                     <table className="w-full table-auto border-collapse border border-gray-300">
-                         <thead>
-                             <tr className="bg-gray-100 text-left text-sm">
-                                 <th className="border border-gray-300 px-2 py-2 w-1/5">Product (Req.)</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[10%]">Batch No. (Req.)</th> {/* Moved Batch */}
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Expiry (MM-YY) (Req.)</th> {/* Moved Expiry */}
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Quantity (Items) (Req.)</th> {/* Moved Quantity */}
-                                  {/* ADDED MRP and Items/Pack Headers */}
-                                  <th className="border border-gray-300 px-2 py-2 w-[8%]">MRP</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Items/Pack</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Price/Item (Req. ≥0)</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Discount (%)</th>
-                                 {/* REMOVED Tax Rate Header */}
-                                  {/* Display Unit, Category, Company - Required but pre-filled/validated*/}
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Unit</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Category</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[8%]">Company</th>
-                                 <th className="border border-gray-300 px-2 py-2 w-[10%]">Item Total</th>
-                                 {/* Total columns: 12 */}
-                                 <th className="border border-gray-300 px-2 py-2 w-[5%] text-center">Actions</th>
-                             </tr>
-                         </thead>
-                         <tbody>
-                             {salesItems.map((item, index) => (
-                                 <tr key={index} className="hover:bg-gray-50">
-                                     <td className="border border-gray-300 px-2 py-1">
-                                         <input
-                                             type="text"
-                                             value={item.product}
-                                             onChange={(e) => handleItemChange(index, 'product', e.target.value)}
-                                             className="w-full p-1 border rounded text-sm"
-                                             list={`product-suggestions-${index}`} // Unique datalist id per row
-                                             required
-                                         />
-                                         {/* Datalist for Product Suggestions */}
-                                         <datalist id={`product-suggestions-${index}`}>
-                                             {getProductSuggestions(item.product).map((productName, i) => (
-                                                 <option key={i} value={productName} />
-                                             ))}
-                                         </datalist>
-                                     </td>
-                                     <td className="border border-gray-300 px-2 py-1"> {/* Batch Input with Datalist */}
-                                         <input
-                                             type="text"
-                                             placeholder="Batch No."
-                                             value={item.batch}
-                                             onChange={(e) => handleItemChange(index, 'batch', e.target.value)}
-                                             className="w-full p-1 border rounded text-sm"
-                                             list={`batch-suggestions-${index}`} // Link to datalist
-                                             required
-                                         />
-                                         {/* Datalist for Batch Suggestions (Populated when product is selected) */}
-                                         <datalist id={`batch-suggestions-${index}`}>
-                                             {/* Iterate through availableBatches stored in the item's state */}
-                                             {item.availableBatches.map((batchDetail, i) => (
-                                                 // Use batchDetail.display for the datalist option value
-                                                 <option key={i} value={batchDetail.display} />
-                                             ))}
-                                         </datalist>
-                                     </td>
-                                     <td className="border border-gray-300 px-2 py-1"> {/* Expiry Input (Auto-filled) */}
-                                         <input
-                                             type="text"
-                                             placeholder="MM-YY"
-                                             value={item.expiry} // Value is auto-filled when batch is selected
-                                              // onChange={(e) => handleItemChange(index, 'expiry', e.target.value)} // Keep handler in case manual edit is needed
-                                             className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed" // Indicate auto-filled/read-only appearance
-                                             readOnly // Make read-only as it's auto-filled
-                                             disabled // Visually disable
-                                             required
-                                             // Consider adding pattern="[0-1][0-9]-[0-9]{2}" for HTML5 validation hint
-                                         />
-                                     </td>
-                                      <td className="border border-gray-300 px-2 py-1"> {/* Quantity Input (Moved) */}
-                                          <input
-                                              type="number"
-                                              placeholder="Items"
-                                              value={item.quantitySold}
-                                              onChange={(e) => handleItemChange(index, 'quantitySold', e.target.value)}
-                                              className="w-full p-1 border rounded text-sm"
-                                              min="0" // Allow 0? Validation requires > 0
-                                              required
-                                          />
-                                      </td>
-                                      {/* ADDED MRP Input (Read-only) */}
-                                      <td className="border border-gray-300 px-2 py-1">
-                                          <input
-                                              type="text" // Use text for display
-                                              placeholder="MRP"
-                                              value={item.productMrp} // Value comes from Product Master lookup
-                                              className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed"
-                                               readOnly disabled
-                                          />
-                                      </td>
-                                       {/* ADDED Items/Pack Input (Read-only) */}
-                                       <td className="border border-gray-300 px-2 py-1">
-                                           <input
-                                               type="text" // Use text for display
-                                               placeholder="Items/Pack"
-                                               value={item.productItemsPerPack} // Value comes from Product Master lookup
-                                               className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed"
-                                               readOnly disabled
-                                           />
-                                       </td>
+                       <h4 className="text-xl font-semibold text-gray-700 mb-3 border-b pb-2 border-gray-200">Sales Items</h4> {/* Subheading for items with bottom border */}
+                        <div className="overflow-x-auto mb-6 border border-gray-200 rounded-md shadow-sm"> {/* Added border, rounded corners, and shadow */}
+                            <table className="min-w-full divide-y divide-gray-200"> {/* Added divide-y */}
+                                <thead className="bg-gray-50"> {/* Styled table header background */}
+                                    <tr> {/* Removed border classes from tr, use th */}
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product (Req.)</th> {/* Styled header cells */}
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch No. (Req.)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry (MM-YY) (Req.)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity (Items) (Req.)</th>
+                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items/Pack</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Item (Req. ≥0)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
+                                        <th scope="col" className="relative px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            <span className="sr-only">Actions</span> {/* Accessibility text */}
+                                            Actions
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200"> {/* Styled table body background and divider */}
+                                    {salesItems.map((item, index) => (
+                                        <tr key={index} className="hover:bg-gray-100 transition duration-100 ease-in-out"> {/* Styled row with hover effect */}
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Adjusted padding and text color */}
+                                                <input
+                                                    type="text"
+                                                    value={item.product}
+                                                    onChange={(e) => handleItemChange(index, 'product', e.target.value)}
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500 text-gray-800 placeholder-gray-400"
+                                                    list={`product-suggestions-${index}`}
+                                                    required
+                                                />
+                                                <datalist id={`product-suggestions-${index}`}>
+                                                    {getProductSuggestions(item.product).map((productName, i) => (
+                                                        <option key={i} value={productName} />
+                                                    ))}
+                                                </datalist>
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Batch Input with Datalist */}
+                                                <input
+                                                    type="text"
+                                                    placeholder="Batch No."
+                                                    value={item.batch}
+                                                    onChange={(e) => handleItemChange(index, 'batch', e.target.value)}
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500 text-gray-800 placeholder-gray-400"
+                                                    list={`batch-suggestions-${index}`}
+                                                    required
+                                                />
+                                                <datalist id={`batch-suggestions-${index}`}>
+                                                    {item.availableBatches.map((batchDetail, i) => (
+                                                        <option key={i} value={batchDetail.display} />
+                                                    ))}
+                                                </datalist>
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Expiry Input (Auto-filled) */}
+                                                <input
+                                                    type="text"
+                                                    placeholder="MM-YY"
+                                                    value={item.expiry}
+                                                     // onChange={(e) => handleItemChange(index, 'expiry', e.target.value)} // Keep handler in case manual edit is needed, but disabled for visual cue
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed" // Indicate auto-filled/read-only appearance
+                                                     readOnly // Make read-only as it's auto-filled
+                                                     disabled // Visually disable
+                                                    required
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Quantity Input */}
+                                                <input
+                                                    type="number"
+                                                    placeholder="Items"
+                                                    value={item.quantitySold}
+                                                    onChange={(e) => handleItemChange(index, 'quantitySold', e.target.value)}
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500 text-gray-800 placeholder-gray-400"
+                                                    min="0"
+                                                    required
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* MRP Input (Read-only) */}
+                                                <input
+                                                    type="text"
+                                                    placeholder="MRP"
+                                                    value={item.productMrp}
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                     readOnly disabled
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Items/Pack Input (Read-only) */}
+                                                 <input
+                                                     type="text"
+                                                     placeholder="Items/Pack"
+                                                     value={item.productItemsPerPack}
+                                                     className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                     readOnly disabled
+                                                 />
+                                             </td>
 
-                                      <td className="border border-gray-300 px-2 py-1">
-                                          <input
-                                              type="number"
-                                              placeholder="Price/Item"
-                                              value={item.pricePerItem} // Value is now the Product Master's MRP / ItemsPerPack
-                                              onChange={(e) => handleItemChange(index, 'pricePerItem', e.target.value)} // Keep handler in case manual override is needed
-                                              className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed" // Indicate derived/read-only appearance
-                                               readOnly // Make read-only as it's auto-derived from MRP/ItemsPerPack
-                                               disabled // Visually disable
-                                              min="0"
-                                              step="0.01"
-                                              required
-                                          />
-                                      </td>
-                                      <td className="border border-gray-300 px-2 py-1">
-                                          <input
-                                              type="number"
-                                              value={item.discount}
-                                              onChange={(e) => handleItemChange(index, 'discount', e.target.value)}
-                                              className="w-full p-1 border rounded text-sm"
-                                              min="0"
-                                              max="100"
-                                          />
-                                      </td>
-                                       {/* REMOVED Tax Rate Input */}
-                                      {/* Display Unit, Category, Company (read-only) - Expected from Master/batch */}
-                                     <td className="border border-gray-300 px-2 py-1">
-                                         <input
-                                             type="text"
-                                             value={item.unit}
-                                              onChange={(e) => handleItemChange(index, 'unit', e.target.value)} // Keep handler in case manual entry is needed
-                                             className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed"
-                                             readOnly disabled
-                                             required // Mark as required for validation purposes
-                                         />
-                                     </td>
-                                     <td className="border border-gray-300 px-2 py-1">
-                                          <input
-                                              type="text"
-                                              value={item.category}
-                                               onChange={(e) => handleItemChange(index, 'category', e.target.value)} // Keep handler
-                                              className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed"
-                                              readOnly disabled
-                                              required // Mark as required for validation purposes
-                                          />
-                                      </td>
-                                      <td className="border border-gray-300 px-2 py-1">
-                                          <input
-                                              type="text"
-                                              value={item.company}
-                                               onChange={(e) => handleItemChange(index, 'company', e.target.value)} // Keep handler
-                                              className="w-full p-1 border rounded text-sm bg-gray-100 cursor-not-allowed"
-                                              readOnly disabled
-                                              required // Mark as required for validation purposes
-                                          />
-                                      </td>
-                                     <td className="border border-gray-300 px-2 py-1 font-semibold">
-                                         ₹{(Number(item.totalItemAmount) || 0).toFixed(2)} {/* Display calculated total */}
-                                     </td>
-                                     <td className="border border-gray-300 px-2 py-1 text-center">
-                                         {salesItems.length > 1 && (
-                                             <Button variant="destructive" size="sm" onClick={() => removeItem(index)} className="bg-red-600 hover:bg-red-700 text-white p-1"><X className="h-4 w-4" /></Button>
-                                         )}
-                                     </td>
-                                 </tr>
-                             ))}
-                         </tbody>
-                     </table>
-                 </div>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Price per Item (Derived/Read-only) */}
+                                                <input
+                                                    type="text" // Use text for display
+                                                    placeholder="Price/Item"
+                                                    value={item.pricePerItem}
+                                                    // onChange={(e) => handleItemChange(index, 'pricePerItem', e.target.value)} // Keep handler if manual override is allowed, but disabled for visual cue
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                     readOnly // Make read-only
+                                                     disabled // Visually disable
+                                                    min="0"
+                                                    step="0.01"
+                                                    required
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Discount Input */}
+                                                <input
+                                                    type="number"
+                                                    placeholder="%"
+                                                    value={item.discount}
+                                                    onChange={(e) => handleItemChange(index, 'discount', e.target.value)}
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500 text-gray-800 placeholder-gray-400"
+                                                    min="0"
+                                                    max="100"
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Unit (Read-only) */}
+                                                <input
+                                                    type="text"
+                                                    value={item.unit}
+                                                     // onChange={(e) => handleItemChange(index, 'unit', e.target.value)} // Keep handler if needed, but disabled
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                    readOnly disabled
+                                                    required
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Category (Read-only) */}
+                                                <input
+                                                    type="text"
+                                                    value={item.category}
+                                                     // onChange={(e) => handleItemChange(index, 'category', e.target.value)} // Keep handler
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                    readOnly disabled
+                                                    required
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900"> {/* Company (Read-only) */}
+                                                <input
+                                                    type="text"
+                                                    value={item.company}
+                                                     // onChange={(e) => handleItemChange(index, 'company', e.target.value)} // Keep handler
+                                                    className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                    readOnly disabled
+                                                    required
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm font-semibold text-gray-800"> {/* Item Total */}
+                                                ₹{(Number(item.totalItemAmount) || 0).toFixed(2)}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-center text-sm font-medium">
+                                                {salesItems.length > 1 && (
+                                                    <Button
+                                                         size="sm"
+                                                         onClick={() => removeItem(index)}
+                                                         className="inline-flex items-center p-1 border border-transparent rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200" // Styled remove button
+                                                         title="Remove Item"
+                                                     >
+                                                         <X className="h-4 w-4" />
+                                                     </Button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
 
 
-                {/* Add Item Button */}
-                <Button onClick={addItem} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded mb-6">
-                    <Plus className="mr-2 h-4 w-4" /> Add Item
-                </Button>
-
-                {/* Grand Total */}
-                <div className="flex justify-end mb-6">
-                    <div className="text-lg font-semibold">
-                        Grand Total: ₹{calculateGrandTotal().toFixed(2)}
-                    </div>
-                </div>
-
-                {/* Save/Update and Cancel Buttons */}
-                <div className="flex justify-start space-x-2 mb-6">
-                    <Button onClick={handleSaveOrUpdateBill} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">
-                        {editingBill ? 'Update Bill' : 'Save Bill'}
-                    </Button>
-                    {editingBill && (
-                        <Button onClick={handleCloseEditDialog} className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">
-                            Cancel Edit
+                       {/* Add Item Button */}
+                        <Button
+                            onClick={addItem}
+                            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200" // Styled add item button
+                        >
+                            <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
-                    )}
-                     {!editingBill && ( // Show Reset button only when adding new bill
-                         <Button onClick={resetForm} className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">
-                             Reset Form
-                         </Button>
-                     )}
-                </div>
 
-                <hr className="my-6" />
+                       {/* Grand Total */}
+                       <div className="flex justify-end my-6"> {/* Adjusted spacing */}
+                           <div className="text-xl font-bold text-gray-800"> {/* Styled total */}
+                               Grand Total: ₹{calculateGrandTotal().toFixed(2)}
+                           </div>
+                       </div>
+
+                       {/* Save/Update and Cancel Buttons */}
+                       <div className="flex justify-start space-x-3"> {/* Increased space */}
+                           <Button
+                                onClick={handleSaveOrUpdateBill}
+                               className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200" // Styled save button
+                           >
+                                <Save className="mr-2 h-4 w-4" /> {editingBill ? 'Update Bill' : 'Save Bill'}
+                           </Button>
+                           {editingBill && (
+                                <Button
+                                     onClick={handleCloseEditDialog}
+                                     className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200" // Styled cancel button
+                                 >
+                                     Cancel Edit
+                                 </Button>
+                           )}
+                            {!editingBill && ( // Show Reset button only when adding new bill
+                                 <Button
+                                      onClick={resetForm}
+                                      className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200" // Styled reset button
+                                  >
+                                      Reset Form
+                                  </Button>
+                            )}
+                       </div>
+                   </div> {/* Closes card-like form section */}
+
+
+                <hr className="my-8 border-gray-300" /> {/* Styled separator */}
 
                 {/* Sales Bill List Section */}
-                <h3 className="text-xl font-semibold mb-2">Sales Bill History</h3>
-                <div className="mb-4">
-                    <input
-                        type="text"
-                        placeholder="Search by Bill No, Customer, or Date"
-                        value={searchQuery}
-                        onChange={handleSearchChange}
-                        className="border p-2 rounded w-full md:w-1/3"
-                    />
-                </div>
-
-                 <div className="overflow-x-auto">
-                     <table className="w-full table-auto border-collapse border border-gray-300">
-                         <thead>
-                             <tr className="bg-gray-100 text-left text-sm">
-                                 <th className="border border-gray-300 px-4 py-2">Bill No</th>
-                                 <th className="border border-gray-300 px-4 py-2">Customer</th>
-                                 <th className="border border-gray-300 px-4 py-2">Date</th>
-                                 <th className="border border-gray-300 px-4 py-2">Total Amount</th>
-                                 <th className="border border-gray-300 px-4 py-2 text-center">Actions</th>
-                             </tr>
-                         </thead>
-                         <tbody>
-                             {filteredSalesBills.length > 0 ? (
-                                 filteredSalesBills.map((bill) => (
-                                     <tr key={bill.id} className="hover:bg-gray-50">
-                                         <td className="border border-gray-300 px-4 py-2">{bill.billNumber}</td>
-                                         <td className="border border-gray-300 px-4 py-2">{bill.customerName}</td>
-                                         <td className="border border-gray-300 px-4 py-2">{bill.date}</td>
-                                         <td className="border border-gray-300 px-4 py-2">₹{Number(bill.totalAmount).toFixed(2)}</td>
-                                         <td className="border border-gray-300 px-4 py-2 text-center">
-                                             <div className="flex justify-center space-x-2">
-                                                 <Button variant="outline" size="sm" onClick={() => handleViewBill(bill)} className="text-blue-600 hover:text-blue-800 p-1"><Eye className="h-4 w-4" /></Button>
-                                                 <Button variant="outline" size="sm" onClick={() => handleEditBill(bill)} className="text-yellow-600 hover:text-yellow-800 p-1"><Edit className="h-4 w-4" /></Button>
-                                                 <Button variant="destructive" size="sm" onClick={() => handleDeleteBill(bill.id, bill.billNumber)} className="bg-red-600 hover:bg-red-700 text-white p-1"><Trash2 className="h-4 w-4" /></Button>
-                                             </div>
-                                         </td>
-                                     </tr>
-                                 ))
-                             ) : (
-                                 <tr>
-                                     <td colSpan="5" className="border border-gray-300 px-4 py-2 text-center">No sales bills found</td>
-                                 </tr>
-                             )}
-                         </tbody>
-                     </table>
-                 </div>
-
-
-                 {/* View Bill Dialog (Simplified) */}
-                 {isViewDialogOpen && selectedBillDetails && (
-                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                         <div className="bg-white p-6 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                             <div className="flex justify-between items-center mb-4">
-                                 <h3 className="text-xl font-semibold">Sales Bill Details: {selectedBillDetails.billNumber}</h3>
-                                 <Button size="sm" onClick={handleCloseViewDialog} className="bg-gray-300 hover:bg-gray-400 text-gray-800 p-1 rounded-full"><X className="h-4 w-4" /></Button>
-                             </div>
-                             <p><strong>Customer:</strong> {selectedBillDetails.customerName}</p>
-                             <p><strong>Date:</strong> {selectedBillDetails.date}</p>
-                             <h4 className="font-semibold mt-4 mb-2">Items:</h4>
-                             <div className="overflow-x-auto">
-                                <table className="w-full table-auto border-collapse border border-gray-300 text-sm">
-                                    <thead>
-                                         <tr className="bg-gray-100 text-left">
-                                             <th className="border border-gray-300 px-2 py-1">Product</th>
-                                             <th className="border border-gray-300 px-2 py-1">Quantity (Items)</th>
-                                             <th className="border border-gray-300 px-2 py-1">Batch</th>
-                                             <th className="border border-gray-300 px-2 py-1">Expiry (MM-YY)</th>
-                                             {/* ADDED MRP and Items/Pack Headers */}
-                                             <th className="border border-gray-300 px-2 py-1">MRP</th>
-                                             <th className="border border-gray-300 px-2 py-1">Items/Pack</th>
-                                             <th className="border border-gray-300 px-2 py-1">Price/Item</th>
-                                             <th className="border border-gray-300 px-2 py-1">Discount (%)</th>
-                                             {/* REMOVED Tax Rate Header */}
-                                             {/* <th className="border border-gray-300 px-2 py-1">Tax Rate (%)</th> */}
-                                             <th className="border border-gray-300 px-2 py-1">Unit</th>
-                                             <th className="border border-gray-300 px-2 py-1">Category</th>
-                                             <th className="border border-gray-300 px-2 py-1">Company</th>
-                                             <th className="border border-gray-300 px-2 py-1">Item Total</th>
-                                         </tr>
-                                     </thead>
-                                     <tbody>
-                                         {selectedBillDetails.items.map((item, itemIndex) => (
-                                             <tr key={itemIndex}>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.product}</td>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.quantitySold}</td>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.batch}</td>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.expiry}</td>
-                                                   {/* ADDED MRP and Items/Pack Data */}
-                                                   <td className="border border-gray-300 px-2 py-1">{item.productMrp ? `₹${Number(item.productMrp).toFixed(2)}` : '-'}</td> {/* Display saved MRP */}
-                                                  <td className="border border-gray-300 px-2 py-1">{item.productItemsPerPack || '-'}</td> {/* Display saved Items/Pack */}
-                                                  <td className="border border-gray-300 px-2 py-1">₹{Number(item.pricePerItem).toFixed(2)}</td>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.discount}%</td>
-                                                   {/* REMOVED Tax Rate Data */}
-                                                   {/* <td className="border border-gray-300 px-2 py-1">{item.taxRate}%</td> */}
-                                                  <td className="border border-gray-300 px-2 py-1">{item.unit}</td>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.category}</td>
-                                                  <td className="border border-gray-300 px-2 py-1">{item.company}</td>
-                                                  <td className="border border-gray-300 px-2 py-1 font-semibold">₹{Number(item.totalItemAmount).toFixed(2)}</td>
-                                             </tr>
-                                         ))}
-                                     </tbody>
-                                 </table>
-                             </div>
-                             <p className="text-lg font-semibold mt-4 text-right">Grand Total: ₹{Number(selectedBillDetails.totalAmount).toFixed(2)}</p>
-                              <div className="flex justify-end mt-4">
-                                   <Button onClick={handleCloseViewDialog} className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">Close</Button>
-                              </div>
-                          </div>
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200"> {/* Card-like list section */}
+                     <h3 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">Sales Bill History</h3> {/* Subheading */}
+                     <div className="mb-6"> {/* Increased spacing */}
+                         <input
+                             type="text"
+                             placeholder="Search by Bill No, Customer, or Date..." // More descriptive placeholder
+                             value={searchQuery}
+                             onChange={handleSearchChange}
+                             className="w-full md:w-1/3 border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out text-gray-800 placeholder-gray-400" // Styled search input
+                         />
                      </div>
-                 )}
 
-                 {/* Edit Bill Dialog - Uses the main form state and inputs (Simplified) */}
-                 {/* The main form area is used for editing when editingBill state is not null */}
+                     <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm"> {/* Added border, rounded corners, and shadow */}
+                         <table className="min-w-full divide-y divide-gray-200"> {/* Added divide-y */}
+                             <thead className="bg-gray-50"> {/* Styled table header background */}
+                                 <tr> {/* Removed border classes from tr, use th */}
+                                     <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bill No</th> {/* Styled header cells */}
+                                     <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                                     <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                     <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
+                                     <th scope="col" className="relative px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                         <span className="sr-only">Actions</span> {/* Accessibility text */}
+                                         Actions
+                                     </th>
+                                 </tr>
+                             </thead>
+                             <tbody className="bg-white divide-y divide-gray-200"> {/* Styled table body background and divider */}
+                                 {filteredSalesBills.length > 0 ? (
+                                     filteredSalesBills.map((bill) => (
+                                         <tr key={bill.id} className="hover:bg-gray-100 transition duration-100 ease-in-out"> {/* Styled row with hover effect */}
+                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{bill.billNumber}</td> {/* Adjusted padding and text color */}
+                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{bill.customerName}</td>
+                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{bill.date}</td>
+                                             <td className="px-3 py-2 whitespace-nowrap text-sm font-semibold text-gray-800">₹{Number(bill.totalAmount).toFixed(2)}</td>
+                                             <td className="px-3 py-2 whitespace-nowrap text-center text-sm font-medium">
+                                                 <div className="flex justify-center space-x-2"> {/* Added space */}
+                                                     <Button
+                                                          variant="outline"
+                                                          size="sm"
+                                                          onClick={() => handleViewBill(bill)}
+                                                          className="inline-flex items-center p-1 border border-transparent rounded-md shadow-sm text-blue-600 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200" // Styled view button
+                                                          title="View Details"
+                                                      >
+                                                          <Eye className="h-4 w-4" />
+                                                      </Button>
+                                                      <Button
+                                                           variant="outline"
+                                                           size="sm"
+                                                           onClick={() => handleEditBill(bill)}
+                                                           className="inline-flex items-center p-1 border border-transparent rounded-md shadow-sm text-yellow-600 hover:text-yellow-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors duration-200" // Styled edit button
+                                                           title="Edit Bill"
+                                                       >
+                                                           <Edit className="h-4 w-4" />
+                                                       </Button>
+                                                      <Button
+                                                           variant="destructive"
+                                                           size="sm"
+                                                           onClick={() => handleDeleteBill(bill.id, bill.billNumber)}
+                                                           className="inline-flex items-center p-1 border border-transparent rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200" // Styled delete button
+                                                           title="Delete Bill"
+                                                       >
+                                                           <Trash2 className="h-4 w-4" />
+                                                       </Button>
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      ))
+                                  ) : (
+                                      <tr>
+                                          <td colSpan="5" className="px-3 py-2 whitespace-nowrap text-center text-sm text-gray-500">No sales bills found</td> {/* Styled message */}
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </div> {/* Closes card-like list section */}
+
+
+                  {/* View Bill Dialog (Styled) */}
+                  {isViewDialogOpen && selectedBillDetails && (
+                      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 backdrop-blur-sm"> {/* Styled backdrop */}
+                          <div className="bg-white p-6 rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300 scale-100 opacity-100 border border-gray-200"> {/* Styled dialog box with border */}
+                              <div className="flex justify-between items-center mb-4 border-b pb-3 border-gray-200"> {/* Styled header */}
+                                  <h3 className="text-xl font-semibold text-gray-800">Sales Bill Details: {selectedBillDetails.billNumber}</h3>
+                                  <Button
+                                       size="sm"
+                                       onClick={handleCloseViewDialog}
+                                       className="inline-flex items-center p-1 border border-gray-300 rounded-full shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200" // Styled close button
+                                       title="Close"
+                                   >
+                                       <X className="h-4 w-4" />
+                                   </Button>
+                              </div>
+                              <div className="mb-4 text-gray-700"> {/* Styled bill info */}
+                                  <p className="mb-1"><strong>Customer:</strong> {selectedBillDetails.customerName}</p>
+                                  <p><strong>Date:</strong> {selectedBillDetails.date}</p>
+                              </div>
+                              <h4 className="font-semibold text-gray-800 mt-4 mb-3 border-b pb-2 border-gray-200">Items:</h4> {/* Styled items heading */}
+                              <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm"> {/* Styled items table container */}
+                                  <table className="min-w-full divide-y divide-gray-200 text-sm"> {/* Styled table */}
+                                      <thead className="bg-gray-50"> {/* Styled table header background */}
+                                           <tr> {/* Removed border classes from tr, use th */}
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th> {/* Styled header cells */}
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty (Items)</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items/Pack</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Item</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                                               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
+                                           </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200"> {/* Styled table body background and divider */}
+                                           {selectedBillDetails.items.map((item, itemIndex) => (
+                                               <tr key={itemIndex} className="hover:bg-gray-50 transition duration-100 ease-in-out"> {/* Styled row with hover */}
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.product}</td> {/* Adjusted padding and text color */}
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.quantitySold}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.batch}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.expiry}</td>
+                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.productMrp ? `₹${Number(item.productMrp).toFixed(2)}` : '-'}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.productItemsPerPack || '-'}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">₹{Number(item.pricePerItem).toFixed(2)}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.discount}%</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.unit}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.category}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.company}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm font-semibold text-gray-800">₹{Number(item.totalItemAmount).toFixed(2)}</td>
+                                               </tr>
+                                           ))}
+                                      </tbody>
+                                  </table>
+                              </div>
+                              <p className="text-lg font-bold text-gray-800 mt-6 text-right">Grand Total: ₹{Number(selectedBillDetails.totalAmount).toFixed(2)}</p> {/* Styled total */}
+                               <div className="flex justify-end mt-6"> {/* Adjusted spacing */}
+                                    <Button
+                                        onClick={handleCloseViewDialog}
+                                        className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200" // Styled close button
+                                    >
+                                        Close
+                                    </Button>
+                                </div>
+                           </div>
+                       </div>
+                   )}
+
+                   {/* Edit Bill Dialog - Note: The main form area is used for editing when editingBill state is not null */}
 
 
             </div> {/* Closes the main container div */}
-        </div> 
+        </div>
     );
 };
 
