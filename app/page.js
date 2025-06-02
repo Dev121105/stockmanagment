@@ -508,12 +508,146 @@ export default function Home() {
     return batchStockList;
   };
 
-  // Function to trigger data export (placeholder)
-  const handleExportData = () => {
-    toast.info("Export functionality coming soon!");
-    console.log("Export data button clicked.");
-    // Implement actual data export logic here (e.g., to CSV, JSON)
+  // Helper function to convert data to CSV format
+  const convertToCSV = (data, headers) => {
+    const csvRows = [];
+    csvRows.push(headers.join(',')); // Add header row
+
+    for (const row of data) {
+      const values = headers.map(header => {
+        const value = row[header] || '';
+        // Handle nested objects for purchase/sales items if needed, or flatten beforehand
+        if (typeof value === 'string') {
+          return `"${value.replace(/"/g, '""')}"`; // Escape double quotes
+        }
+        return value;
+      });
+      csvRows.push(values.join(','));
+    }
+    return csvRows.join('\n');
   };
+
+  // Function to download CSV
+  const downloadCSV = (data, filename) => {
+    const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) { // feature detection
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  // Function to trigger data export
+  const handleExportData = () => {
+    if (products.length === 0 && purchaseBills.length === 0 && salesBills.length === 0) {
+      toast.info("No data to export.");
+      return;
+    }
+
+    // Export Products
+    if (products.length > 0) {
+      const productHeaders = [
+        'id', 'name', 'quantity', 'mrp', 'originalMrp', 'itemsPerPack',
+        'minStock', 'maxStock', 'discount', 'unit', 'category', 'company',
+        'batch', 'expiry'
+      ];
+      const productCSV = convertToCSV(products, productHeaders);
+      downloadCSV(productCSV, 'products_export.csv');
+      toast.success("Product data exported successfully!");
+    } else {
+      toast.info("No product data to export.");
+    }
+
+    // Export Purchase Bills
+    if (purchaseBills.length > 0) {
+      // Flatten purchase bill data for CSV export
+      const flattenedPurchaseData = [];
+      purchaseBills.forEach(bill => {
+        bill.items.forEach(item => {
+          flattenedPurchaseData.push({
+            billNumber: bill.billNumber,
+            date: bill.date,
+            supplierName: bill.supplierName,
+            totalAmount: bill.totalAmount,
+            product: item.product,
+            batch: item.batch,
+            expiry: item.expiry,
+            quantity: item.quantity,
+            packsPurchased: item.packsPurchased,
+            itemsPerPack: item.itemsPerPack,
+            ptr: item.ptr,
+            mrp: item.mrp,
+            originalMrp: item.originalMrp,
+            unit: item.unit,
+            category: item.category,
+            company: item.company,
+            discount: item.discount,
+            taxRate: item.taxRate,
+            totalItemAmount: item.totalItemAmount,
+          });
+        });
+      });
+
+      const purchaseHeaders = [
+        'billNumber', 'date', 'supplierName', 'totalAmount', 'product', 'batch',
+        'expiry', 'quantity', 'packsPurchased', 'itemsPerPack', 'ptr', 'mrp',
+        'originalMrp', 'unit', 'category', 'company', 'discount', 'taxRate',
+        'totalItemAmount'
+      ];
+      const purchaseCSV = convertToCSV(flattenedPurchaseData, purchaseHeaders);
+      downloadCSV(purchaseCSV, 'purchase_bills_export.csv');
+      toast.success("Purchase bill data exported successfully!");
+    } else {
+      toast.info("No purchase bill data to export.");
+    }
+
+    // Export Sales Bills
+    if (salesBills.length > 0) {
+      // Flatten sales bill data for CSV export
+      const flattenedSalesData = [];
+      salesBills.forEach(bill => {
+        bill.items.forEach(item => {
+          flattenedSalesData.push({
+            billNumber: bill.billNumber,
+            date: bill.date,
+            customerName: bill.customerName,
+            totalAmount: bill.totalAmount,
+            product: item.product,
+            quantitySold: item.quantitySold,
+            pricePerItem: item.pricePerItem,
+            discount: item.discount,
+            totalItemAmount: item.totalItemAmount,
+            productMrp: item.productMrp,
+            productItemsPerPack: item.productItemsPerPack,
+            purchasedMrp: item.purchasedMrp,
+            batch: item.batch,
+            expiry: item.expiry,
+            unit: item.unit,
+            category: item.category,
+            company: item.company,
+          });
+        });
+      });
+
+      const salesHeaders = [
+        'billNumber', 'date', 'customerName', 'totalAmount', 'product',
+        'quantitySold', 'pricePerItem', 'discount', 'totalItemAmount',
+        'productMrp', 'productItemsPerPack', 'purchasedMrp', 'batch', 'expiry',
+        'unit', 'category', 'company'
+      ];
+      const salesCSV = convertToCSV(flattenedSalesData, salesHeaders);
+      downloadCSV(salesCSV, 'sales_bills_export.csv');
+      toast.success("Sales bill data exported successfully!");
+    } else {
+      toast.info("No sales bill data to export.");
+    }
+  };
+
 
   if (loading) {
     return (
@@ -540,7 +674,7 @@ export default function Home() {
         <div className="flex justify-between items-center mb-8">
           <h2 className="text-3xl font-bold text-gray-800">Dashboard</h2>
           <div className="flex space-x-3">
-            <Link href="/product-master" passHref>
+            <Link href="/productmaster" passHref>
               <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
                 Product Master
               </Button>

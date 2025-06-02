@@ -1,7 +1,7 @@
 // app/productmaster/page.js
 "use client"; // This directive is needed for client-side functionality
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '../components/button'; // Adjust path as per your project structure
 import { useRouter } from 'next/navigation';
 import Header from '../components/Header'; // Adjust path as per your project structure
@@ -19,11 +19,15 @@ import {
     Boxes, // Icon for Items Per Pack
     ArrowDownCircle, // Icon for Min Stock
     ArrowUpCircle, // Icon for Max Stock
-    DollarSign, // Changed from Currency for better visual if available, or stick to Currency
+    IndianRupee, // Changed from DollarSign for Rupee icon
     Percent,
     Scale,
     X,
-    Save // Added Save icon
+    Save, // Added Save icon
+    ArrowDownUp, // Icon for sortable columns
+    ChevronLeft, // Icon for pagination previous
+    ChevronRight, // Icon for pagination next
+    RefreshCcw // Icon for Clear Form
 } from 'lucide-react';
 
 const ProductMasterPage = () => {
@@ -46,7 +50,14 @@ const ProductMasterPage = () => {
     const [products, setProducts] = useState([]);
     const [editingProduct, setEditingProduct] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
-    // filteredProducts is now derived directly in the JSX render section
+
+    // State for Sorting
+    const [sortColumn, setSortColumn] = useState('name');
+    const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+
+    // State for Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [productsPerPage] = useState(10); // Number of products per page
 
     const predefinedUnits = [
         'Pcs', 'Bottle', 'Strip', 'Box', 'Tube', 'Gm', 'Kg', 'Ml', 'Liter',
@@ -346,9 +357,8 @@ const ProductMasterPage = () => {
         );
     };
 
-
     // Reset the form and editing state
-    const resetForm = () => {
+    const resetForm = useCallback(() => {
         console.log("Resetting product form.");
         setProductForm({
             name: '', unit: '', category: '', company: '', itemsPerPack: '',
@@ -356,25 +366,68 @@ const ProductMasterPage = () => {
         });
         setEditingProduct(null);
         console.log("Product form reset.");
+    }, []); // No dependencies, can be memoized
+
+    // Handler for sorting column
+    const handleSort = (column) => {
+        if (sortColumn === column) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+        setCurrentPage(1); // Reset to first page on sort
     };
 
-    // Derived state for filtered products - Recalculated whenever products or searchQuery changes
-    const currentFilteredProducts = useMemo(() => { // Used useMemo here
-        console.log("Filtering products based on query:", searchQuery);
+    // Derived state for filtered and sorted products
+    const currentFilteredAndSortedProducts = useMemo(() => {
+        console.log("Filtering and sorting products based on query and sort state...");
         const query = searchQuery.toLowerCase();
         const filtered = products.filter(product => {
-            // Ensure properties exist before calling toLowerCase
             const nameMatch = product.name && product.name.toLowerCase().includes(query);
             const unitMatch = product.unit && product.unit.toLowerCase().includes(query);
             const categoryMatch = product.category && product.category.toLowerCase().includes(query);
             const companyMatch = product.company && product.company.toLowerCase().includes(query);
-
             return nameMatch || unitMatch || categoryMatch || companyMatch;
         });
-        console.log("Filtered products count:", filtered.length);
-        return filtered;
-    }, [products, searchQuery]); // Dependencies: products state and searchQuery state
 
+        // Apply sorting
+        const sorted = [...filtered].sort((a, b) => {
+            const aValue = a[sortColumn];
+            const bValue = b[sortColumn];
+
+            // Handle numeric comparisons
+            if (typeof aValue === 'number' && typeof bValue === 'number') {
+                return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+            }
+            // Handle string comparisons
+            if (aValue && bValue) {
+                const comparison = String(aValue).toLowerCase().localeCompare(String(bValue).toLowerCase());
+                return sortDirection === 'asc' ? comparison : -comparison;
+            }
+            // Fallback for null/undefined values or mixed types
+            return 0;
+        });
+
+        console.log("Filtered and sorted products count:", sorted.length);
+        return sorted;
+    }, [products, searchQuery, sortColumn, sortDirection]);
+
+    // Pagination logic
+    const totalPages = Math.ceil(currentFilteredAndSortedProducts.length / productsPerPage);
+    const indexOfLastProduct = currentPage * productsPerPage;
+    const indexOfFirstProduct = indexOfLastProduct - productsPerPage;
+    const currentProducts = currentFilteredAndSortedProducts.slice(indexOfFirstProduct, indexOfLastProduct);
+
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
+    // Get the current sort icon based on column and direction
+    const getSortIcon = (column) => {
+        if (sortColumn === column) {
+            return sortDirection === 'asc' ? '▲' : '▼';
+        }
+        return '';
+    };
 
     return (
         <> {/* Using React Fragment */}
@@ -468,7 +521,7 @@ const ProductMasterPage = () => {
                                 />
                             </div>
                              <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <DollarSign className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
+                                <IndianRupee className="h-5 w-5 text-gray-400 mx-3 shrink-0" /> {/* Changed from DollarSign */}
                                 <input
                                     key="mrp"
                                     type="number"
@@ -557,9 +610,13 @@ const ProductMasterPage = () => {
                                 {editingProduct ? <Edit className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
                                 {editingProduct ? 'Update Product' : 'Save Product'}
                             </Button>
-                            {editingProduct && (
+                            {editingProduct ? (
                                 <Button onClick={resetForm} className="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
                                     <X className="mr-2 h-4 w-4" /> Cancel Edit
+                                </Button>
+                            ) : (
+                                <Button onClick={resetForm} className="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
+                                    <RefreshCcw className="mr-2 h-4 w-4" /> Clear Form
                                 </Button>
                             )}
                         </div>
@@ -579,7 +636,10 @@ const ProductMasterPage = () => {
                                     type="text"
                                     placeholder="Search products..."
                                     value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    onChange={(e) => {
+                                        setSearchQuery(e.target.value);
+                                        setCurrentPage(1); // Reset to first page on search
+                                    }}
                                     className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
                                 />
                             </div>
@@ -589,30 +649,53 @@ const ProductMasterPage = () => {
                             <table className="min-w-full table-auto">
                                 <thead className="bg-gray-50">
                                     <tr className="text-left text-xs sm:text-sm text-gray-600 uppercase tracking-wider">
-                                        {/* Adjusted headers for clarity and responsive padding */}
-                                        <th className="px-4 py-3 font-semibold">Name</th>
-                                        <th className="px-3 py-3 font-semibold">Unit</th>
-                                        <th className="px-3 py-3 font-semibold hidden md:table-cell">Category</th>
-                                        <th className="px-3 py-3 font-semibold hidden lg:table-cell">Company</th>
-                                        <th className="px-3 py-3 font-semibold text-center">Items/Pack</th>
-                                        <th className="px-3 py-3 font-semibold text-right hidden sm:table-cell">MRP</th>
-                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell">Disc %</th>
-                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell">Tax %</th>
-                                        <th className="px-3 py-3 font-semibold text-right">Stock</th>
+                                        <th className="px-4 py-3 font-semibold cursor-pointer" onClick={() => handleSort('name')}>
+                                            Name {getSortIcon('name')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold cursor-pointer" onClick={() => handleSort('unit')}>
+                                            Unit {getSortIcon('unit')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold hidden md:table-cell cursor-pointer" onClick={() => handleSort('category')}>
+                                            Category {getSortIcon('category')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold hidden lg:table-cell cursor-pointer" onClick={() => handleSort('company')}>
+                                            Company {getSortIcon('company')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold text-center cursor-pointer" onClick={() => handleSort('itemsPerPack')}>
+                                            Items/Pack {getSortIcon('itemsPerPack')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold text-right hidden sm:table-cell cursor-pointer" onClick={() => handleSort('mrp')}>
+                                            MRP {getSortIcon('mrp')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell cursor-pointer" onClick={() => handleSort('discount')}>
+                                            Disc % {getSortIcon('discount')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell cursor-pointer" onClick={() => handleSort('taxRate')}>
+                                            Tax % {getSortIcon('taxRate')}
+                                        </th>
+                                        <th className="px-3 py-3 font-semibold text-right cursor-pointer" onClick={() => handleSort('quantity')}>
+                                            Stock {getSortIcon('quantity')}
+                                        </th>
                                         <th className="px-4 py-3 font-semibold text-center">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 bg-white">
-                                    {currentFilteredProducts.length > 0 ? (
-                                        currentFilteredProducts.map((product) => (
+                                    {currentProducts.length > 0 ? (
+                                        currentProducts.map((product) => (
                                             // Added fade-in-item class to table rows
-                                            <tr key={product.id} className="hover:bg-slate-50 transition-colors duration-150 text-sm text-gray-700 fade-in-item">
+                                            <tr
+                                                key={product.id}
+                                                className={`hover:bg-slate-50 transition-colors duration-150 text-sm text-gray-700 fade-in-item
+                                                ${product.quantity <= product.minStock && product.minStock > 0 ? 'bg-red-50 text-red-700' : ''}
+                                                ${product.quantity >= product.maxStock && product.maxStock > 0 ? 'bg-amber-50 text-amber-700' : ''}
+                                                `}
+                                            >
                                                 <td className="px-4 py-3 font-medium whitespace-nowrap">{product.name}</td>
                                                 <td className="px-3 py-3 whitespace-nowrap">{product.unit}</td>
                                                 <td className="px-3 py-3 whitespace-nowrap hidden md:table-cell">{product.category || '-'}</td>
                                                 <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">{product.company || '-'}</td>
                                                 <td className="px-3 py-3 text-center whitespace-nowrap">{product.itemsPerPack}</td>
-                                                <td className="px-3 py-3 text-right whitespace-nowrap hidden sm:table-cell">₹{Number(product.mrp).toFixed(2)}</td>
+                                               <td className="px-3 py-3 text-right whitespace-nowrap hidden sm:table-cell">₹{Number(product.mrp).toFixed(2)}</td>
                                                 <td className="px-3 py-3 text-center whitespace-nowrap hidden lg:table-cell">{product.discount}%</td>
                                                 <td className="px-3 py-3 text-center whitespace-nowrap hidden lg:table-cell">{product.taxRate}%</td>
                                                 <td className="px-3 py-3 text-right whitespace-nowrap font-medium">{product.quantity}</td>
@@ -638,8 +721,41 @@ const ProductMasterPage = () => {
                                 </tbody>
                             </table>
                         </div>
-                         {currentFilteredProducts.length === 0 && products.length > 0 && !searchQuery && (
-                            <p className="text-center text-gray-500 mt-4">No products match your current filter.</p>
+
+                        {/* Pagination Controls */}
+                        {currentFilteredAndSortedProducts.length > productsPerPage && (
+                            <nav className="flex justify-center items-center gap-2 pt-4" aria-label="Pagination">
+                                <Button
+                                    onClick={() => paginate(currentPage - 1)}
+                                    disabled={currentPage === 1}
+                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg"
+                                >
+                                    <ChevronLeft className="h-5 w-5" /> Previous
+                                </Button>
+                                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                                    <Button
+                                        key={page}
+                                        onClick={() => paginate(page)}
+                                        className={`px-4 py-2 rounded-lg ${currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
+                                    >
+                                        {page}
+                                    </Button>
+                                ))}
+                                <Button
+                                    onClick={() => paginate(currentPage + 1)}
+                                    disabled={currentPage === totalPages}
+                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg"
+                                >
+                                    Next <ChevronRight className="h-5 w-5" />
+                                </Button>
+                            </nav>
+                        )}
+
+                         {currentFilteredAndSortedProducts.length === 0 && products.length > 0 && searchQuery && (
+                            <p className="text-center text-gray-500 mt-4">No products match your current search query.</p>
+                        )}
+                        {currentFilteredAndSortedProducts.length === 0 && products.length > 0 && !searchQuery && (
+                            <p className="text-center text-gray-500 mt-4">No products available after filtering/sorting.</p>
                         )}
                     </div>
                 </div>
