@@ -1,9 +1,9 @@
 // app/summary/page.js
 "use client"; // This directive is needed for client-side functionality
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react"; // Import useMemo
 // Adjust path if needed - assuming TotalSummary is in the 'components' folder
-import TotalSummary from "../pages/TotalSummary";
+import TotalSummary from "../components/TotalSummary";
 import Header from "../components/Header";
 // Import toast for error messages
 import { toast } from 'sonner';
@@ -95,22 +95,33 @@ export default function SummaryPage() {
 
    }, []); // Empty dependency array means this runs only once on mount
 
-   // Calculate totals whenever the products state changes
-    // These calculations will automatically re-run when setProducts is called
-   const totalQuantity = products.reduce((sum, product) => {
-         // Ensure quantity is a number before adding
-         return sum + (Number(product.quantity) || 0);
-     }, 0);
+   // Calculate totals whenever the products state changes using useMemo
+    const totalQuantity = useMemo(() => {
+        console.log("SummaryPage useMemo: Calculating total quantity...");
+        return products.reduce((sum, product) => {
+            // Ensure quantity is a number before adding
+            return sum + (Number(product.quantity) || 0);
+        }, 0);
+    }, [products]); // Recalculate when products change
 
-   const totalValue = products.reduce(
-     (sum, product) => {
-            // Ensure quantity and mrp are numbers before multiplying and adding
-            const quantity = Number(product.quantity) || 0;
-            const mrp = Number(product.mrp) || 0; // Use mrp from Product Master for value
-            return sum + (quantity * mrp);
-        },
-     0
-   );
+
+    const totalValue = useMemo(() => {
+        console.log("SummaryPage useMemo: Calculating total value...");
+        return products.reduce(
+            (sum, product) => {
+                // Ensure quantity and mrp are numbers before multiplying and adding
+                const quantity = Number(product.quantity) || 0;
+                const mrp = Number(product.mrp) || 0; // Use mrp from Product Master for value
+                // Assuming MRP is per pack and quantity is in items, divide MRP by itemsPerPack
+                const itemsPerPack = Number(product.itemsPerPack) || 1;
+                const valuePerItem = (itemsPerPack > 0) ? (mrp / itemsPerPack) : mrp;
+
+                return sum + (quantity * valuePerItem);
+            },
+            0
+        );
+    }, [products]); // Recalculate when products change
+
 
    return (
      <> {/* Use Fragment instead of div if Header is not wrapped in div */}
@@ -122,11 +133,21 @@ export default function SummaryPage() {
                 {loading ? (
                     <div className="text-center text-gray-500">Loading summary data...</div>
                 ) : (
-                    // Pass the calculated totals to the TotalSummary component
-                    <TotalSummary
-                        totalQuantity={totalQuantity}
-                        totalValue={totalValue}
-                    />
+                    // Pass the calculated totals to the TotalSummary component as the correct props
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6"> {/* Use a grid for layout */}
+                         <TotalSummary
+                             title="Total Stock Quantity" // Title for quantity
+                             value={totalQuantity.toLocaleString()} // Format quantity
+                             description="Total number of items across all products"
+                             bgColor="bg-blue-500" // Example color
+                         />
+                         <TotalSummary
+                             title="Total Stock Value (Current MRP)" // Title for value
+                             value={`₹${totalValue.toFixed(2)}`} // Format value with currency
+                             description="Value of current inventory based on latest Master MRP"
+                             bgColor="bg-green-500" // Example color
+                         />
+                    </div>
                 )}
 
        </div>

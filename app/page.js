@@ -1,87 +1,73 @@
-  // app/page.js
-  "use client";
+// app/page.js
+"use client";
 
-  import React, { useState, useEffect, useMemo } from "react";
-  import Header from "./components/Header";
-  import Link from "next/link";
-  import { Button } from "./components/button";
-  import TotalSummary from "./pages/TotalSummary";
-  import { ChevronDown, ChevronUp, Download, AlertTriangle } from "lucide-react";
-  import { toast } from "sonner";
+import React, { useState, useEffect, useMemo } from "react";
+import Header from "./components/Header";
+import Link from "next/link";
+import { Button } from "./components/button";
+// Import TotalSummary component
+import TotalSummary from "./pages/TotalSummary"; // Ensure this path is correct
+import { ChevronDown, ChevronUp, Download, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 
-  // Helper function to format date as DD-MM-YYYY
-  function formatDate(date) {
-    if (!date) return "";
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    return `${day}-${month}-${year}`;
-  }
+// Helper function to format date as DD-MM-YYYY
+function formatDate(date) {
+  if (!date) return "";
+  const d = new Date(date);
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+}
 
-  // Helper function to parse DD-MM-YYYY string to Date
-  function parseDate(dateString) {
-    if (
-      !dateString ||
-      typeof dateString !== "string" ||
-      dateString.trim() === ""
-    ) {
-      return null;
-    }
-    const [day, month, year] = dateString.split("-");
-    if (
-      day &&
-      month &&
-      year &&
-      !isNaN(parseInt(day, 10)) &&
-      !isNaN(parseInt(month, 10)) &&
-      !isNaN(parseInt(year, 10))
-    ) {
-      const dayInt = parseInt(day, 10);
-      const monthInt = parseInt(month, 10);
-      const yearInt = parseInt(year, 10);
-      if (
-        dayInt >= 1 &&
-        dayInt <= 31 &&
-        monthInt >= 1 &&
-        monthInt <= 12 &&
-        yearInt >= 1900 &&
-        yearInt <= 2100
-      ) {
-        return new Date(yearInt, monthInt - 1, dayInt);
-      }
-    }
+// Helper function to parse DD-MM-YYYY string to Date
+function parseDate(dateString) {
+  if (
+    !dateString ||
+    typeof dateString !== "string" ||
+    dateString.trim() === ""
+  ) {
     return null;
   }
-
-  // Helper function to parse MM-YY date strings into a Date object
-  function parseMonthYearDate(dateString) {
-    if (
-      !dateString ||
-      typeof dateString !== "string" ||
-      dateString.trim() === ""
-    ) {
-      return null;
-    }
-    const parts = dateString.split("-");
-    if (parts.length !== 2) {
-      return null;
-    }
-    const [month, year] = parts;
+  const [day, month, year] = dateString.split("-");
+  if (
+    day &&
+    month &&
+    year &&
+    !isNaN(parseInt(day, 10)) &&
+    !isNaN(parseInt(month, 10)) &&
+    !isNaN(parseInt(year, 10))
+  ) {
+    const dayInt = parseInt(day, 10);
     const monthInt = parseInt(month, 10);
     const yearInt = parseInt(year, 10);
-
-    if (month && year && !isNaN(monthInt) && !isNaN(yearInt)) {
-      if (monthInt >= 1 && monthInt <= 12 && yearInt >= 0 && yearInt <= 99) {
-        const fullYear = 2000 + yearInt; // Assuming 20xx for YY
-        return new Date(fullYear, monthInt - 1, 1);
-      }
+    // Month is 0-indexed in Date constructor
+    if (
+      dayInt >= 1 &&
+      dayInt <= 31 &&
+      monthInt >= 1 &&
+      monthInt <= 12 &&
+      yearInt >= 1900 &&
+      yearInt <= 2100
+    ) {
+      return new Date(yearInt, monthInt - 1, dayInt);
     }
-    return null;
   }
+  return null; // Default to null if parsing fails
+}
 
-  // Helper function to load products from localStorage and ensure data types
-  const loadProductsFromLocalStorage = () => {
+export default function Home() {
+  const [products, setProducts] = useState([]);
+  const [purchaseBills, setPurchaseBills] = useState([]);
+  const [salesBills, setSalesBills] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expandedRow, setExpandedRow] = useState(null); // State to track expanded row
+
+  // --- Data Loading Effects ---
+
+  // Load Products
+  useEffect(() => {
     console.log("Dashboard: Attempting to load products from localStorage...");
     try {
       const storedProducts = localStorage.getItem("products");
@@ -96,13 +82,13 @@
           try {
             return {
               ...p,
-              quantity: Number(p.quantity) || 0,
-              mrp: Number(p.mrp) || 0,
-              itemsPerPack: Number(p.itemsPerPack) || 1,
+              quantity: Number(p.quantity) || 0, // Stock quantity (individual items)
+              mrp: Number(p.mrp) || 0, // Current Selling price (from Master)
+              originalMrp: Number(p.originalMrp) || 0, // Original Purchased MRP (if stored in master)
+              itemsPerPack: Number(p.itemsPerPack) || 1, // Items per pack
               minStock: Number(p.minStock) || 0,
               maxStock: Number(p.maxStock) || 0,
               discount: Number(p.discount) || 0,
-              taxRate: Number(p.taxRate) || 0,
               name: p.name || "",
               unit: p.unit || "",
               category: p.category || "",
@@ -117,27 +103,36 @@
               p,
               mapErr
             );
+            toast.error(
+              `Error processing product data for item with ID: ${
+                p?.id || "unknown"
+              }.`
+            );
             return null;
           }
         })
         .filter((p) => p !== null);
+
       console.log(
         "Dashboard: Finished processing products. Valid product count:",
         processedProducts.length
       );
-      return processedProducts;
+      setProducts(processedProducts);
     } catch (err) {
       console.error(
         "Dashboard: Error loading or parsing products from localStorage:",
         err
       );
-      toast.error("Error loading product data for dashboard.");
-      return [];
+      setError("Error loading product master data.");
+      toast.error("Error loading product master data.");
+      setProducts([]);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
 
-  // Helper function to load purchase bills from localStorage
-  const loadPurchaseBillsFromLocalStorage = () => {
+  // Load Purchase Bills
+  useEffect(() => {
     console.log(
       "Dashboard: Attempting to load purchase bills from localStorage..."
     );
@@ -148,22 +143,43 @@
         "Dashboard: Successfully parsed purchase bills. Count:",
         bills.length
       );
-      const processedBills = bills.map((bill) => ({
-        ...bill,
-        date: bill.date || "",
-        items: bill.items.map((item) => ({
-          ...item,
-          product: item.product || "",
-          batch: item.batch || "",
-          expiry: item.expiry || "",
-          quantity: Number(item.quantity) || 0,
-          packsPurchased: Number(item.packsPurchased) || 0,
-          itemsPerPack: Number(item.itemsPerPack) || 1,
-          ptr: Number(item.ptr) || 0,
-          totalItemAmount: Number(item.totalItemAmount) || 0,
-        })),
-        totalAmount: Number(bill.totalAmount) || 0,
-      }));
+      const processedBills = bills
+        .map((bill) => {
+          try {
+            return {
+              ...bill,
+              date: bill.date || "",
+              items: bill.items.map((item) => ({
+                ...item,
+                product: item.product || "",
+                batch: item.batch || "",
+                expiry: item.expiry || "",
+                quantity: Number(item.quantity) || 0, // Quantity purchased in this line
+                packsPurchased: Number(item.packsPurchased) || 0,
+                itemsPerPack: Number(item.itemsPerPack) || 1,
+                ptr: Number(item.ptr) || 0,
+                mrp: Number(item.mrp) || 0, // Entered/Confirmed MRP from Purchase
+                originalMrp: Number(item.originalMrp) || 0, // Original Master MRP from Purchase
+                unit: item.unit || "",
+                category: item.category || "",
+                company: item.company || "",
+                discount: Number(item.discount) || 0, // Discount on Purchase
+                taxRate: Number(item.taxRate) || 0,
+              })),
+              totalAmount: Number(bill.totalAmount) || 0,
+            };
+          } catch (mapErr) {
+            console.error(
+              "Dashboard: Error processing purchase bill item during map:",
+              bill,
+              mapErr
+            );
+            // Decide if you want a toast here or just log the error
+            return null; // Filter out problematic bills
+          }
+        })
+        .filter((bill) => bill !== null);
+
       processedBills.sort((a, b) => {
         const dateA = parseDate(a.date);
         const dateB = parseDate(b.date);
@@ -172,16 +188,20 @@
         if (!dateB) return -1;
         return dateB - dateA;
       });
-      return processedBills;
+      setPurchaseBills(processedBills);
     } catch (err) {
-      console.error("Dashboard: Error loading or parsing purchase bills:", err);
-      toast.error("Error loading purchase bill data for dashboard.");
-      return [];
+      console.error(
+        "Dashboard: Error loading or parsing purchase bills:",
+        err
+      );
+      setError("Error loading purchase bill data.");
+      toast.error("Error loading purchase bill data.");
+      setPurchaseBills([]);
     }
-  };
+  }, []);
 
-  // Helper function to load sales bills from localStorage
-  const loadSalesBillsFromLocalStorage = () => {
+  // Load Sales Bills
+  useEffect(() => {
     console.log("Dashboard: Attempting to load sales bills from localStorage...");
     try {
       const storedBills = localStorage.getItem("salesBills");
@@ -190,20 +210,45 @@
         "Dashboard: Successfully parsed sales bills. Count:",
         bills.length
       );
-      const processedBills = bills.map((bill) => ({
-        ...bill,
-        date: bill.date || "",
-        items: bill.items.map((item) => ({
-          ...item,
-          product: item.product || "",
-          batch: item.batch || "",
-          expiry: item.expiry || "",
-          quantitySold: Number(item.quantitySold) || 0,
-          pricePerItem: Number(item.pricePerItem) || 0,
-          totalItemAmount: Number(item.totalItemAmount) || 0,
-        })),
-        totalAmount: Number(bill.totalAmount) || 0,
-      }));
+      const processedBills = bills
+        .map((bill) => {
+          try {
+            return {
+              ...bill,
+              date: bill.date
+                ? formatDate(parseDate(bill.date)) || bill.date || ""
+                : "",
+              totalAmount: Number(bill.totalAmount) || 0,
+              customerName: bill.customerName || "",
+              items: bill.items.map((item) => ({
+                ...item,
+                quantitySold: Number(item.quantitySold) || 0,
+                pricePerItem: Number(item.pricePerItem) || 0,
+                discount: Number(item.discount) || 0, // Discount on Sale
+                totalItemAmount: Number(item.totalItemAmount) || 0,
+                productMrp: Number(item.productMrp) || 0, // MRP used for the sale
+                productItemsPerPack: Number(item.productItemsPerPack) || 1,
+                purchasedMrp: Number(item.purchasedMrp) || 0, // Purchased MRP from the Purchase record
+                product: item.product || "",
+                batch: item.batch || "",
+                expiry: item.expiry || "",
+                unit: item.unit || "",
+                category: item.category || "",
+                company: item.company || "",
+              })),
+            };
+          } catch (mapErr) {
+            console.error(
+              "Dashboard: Error processing sales bill item during map:",
+              bill,
+              mapErr
+            );
+            // Decide if you want a toast here or just log the error
+            return null; // Filter out problematic bills
+          }
+        })
+        .filter((bill) => bill !== null);
+
       processedBills.sort((a, b) => {
         const dateA = parseDate(a.date);
         const dateB = parseDate(b.date);
@@ -212,762 +257,926 @@
         if (!dateB) return -1;
         return dateB - dateA;
       });
-      return processedBills;
+      setSalesBills(processedBills);
     } catch (err) {
       console.error("Dashboard: Error loading or parsing sales bills:", err);
-      toast.error("Error loading sales bill data for dashboard.");
-      return [];
+      setError("Error loading sales bill data.");
+      toast.error("Error loading sales bill data.");
+      setSalesBills([]);
     }
+  }, []);
+
+  // Listen for updates from other pages (e.g., Product Master, Purchase, Sales)
+  useEffect(() => {
+    const handleDataUpdated = () => {
+      console.log("Dashboard: Data updated event received. Reloading all data.");
+      // Reload all data when any dataUpdated event is dispatched
+      try {
+        const storedProducts = localStorage.getItem("products");
+        const products = storedProducts ? JSON.parse(storedProducts) : [];
+        setProducts(
+          products.map((p) => ({
+            ...p,
+            quantity: Number(p.quantity) || 0,
+            mrp: Number(p.mrp) || 0, // Current Selling price (from Master)
+            originalMrp: Number(p.originalMrp) || 0, // Original Purchased MRP
+            itemsPerPack: Number(p.itemsPerPack) || 1,
+            minStock: Number(p.minStock) || 0,
+            maxStock: Number(p.maxStock) || 0,
+            discount: Number(p.discount) || 0,
+          }))
+        );
+
+        const storedPurchaseBills = localStorage.getItem("purchaseBills");
+        const purchaseBills = storedPurchaseBills
+          ? JSON.parse(storedPurchaseBills)
+          : [];
+        setPurchaseBills(
+          purchaseBills.map((bill) => ({
+            ...bill,
+            items: bill.items.map((item) => ({
+              ...item,
+              quantity: Number(item.quantity) || 0,
+              itemsPerPack: Number(item.itemsPerPack) || 1,
+              ptr: Number(item.ptr) || 0,
+              mrp: Number(item.mrp) || 0, // Entered/Confirmed MRP from Purchase
+              originalMrp: Number(item.originalMrp) || 0, // Original Master MRP from Purchase
+              discount: Number(item.discount) || 0,
+              taxRate: Number(item.taxRate) || 0,
+            })),
+            totalAmount: Number(bill.totalAmount) || 0,
+          }))
+        );
+
+        const storedSalesBills = localStorage.getItem("salesBills");
+        const salesBills = storedSalesBills ? JSON.parse(storedSalesBills) : [];
+        setSalesBills(
+          salesBills.map((bill) => ({
+            ...bill,
+            items: bill.items.map((item) => ({
+              ...item,
+              quantitySold: Number(item.quantitySold) || 0,
+              pricePerItem: Number(item.pricePerItem) || 0,
+              discount: Number(item.discount) || 0,
+              totalItemAmount: Number(item.totalItemAmount) || 0,
+              productMrp: Number(item.productMrp) || 0, // MRP used for the sale
+              productItemsPerPack: Number(item.productItemsPerPack) || 1,
+              purchasedMrp: Number(item.purchasedMrp) || 0, // Purchased MRP from the Purchase record
+            })),
+            totalAmount: Number(bill.totalAmount) || 0,
+          }))
+        );
+      } catch (e) {
+        console.error("Dashboard: Error reloading data from localStorage:", e);
+        toast.error("Error reloading data.");
+      }
+    };
+
+    window.addEventListener("productsUpdated", handleDataUpdated);
+    window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
+    window.addEventListener("salesBillsUpdated", handleDataUpdated);
+
+    return () => {
+      window.removeEventListener("productsUpdated", handleDataUpdated);
+      window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
+      window.removeEventListener("salesBillsUpdated", handleDataUpdated);
+    };
+  }, []);
+
+  // --- Calculations (Memoized) ---
+
+  const totalStockValue = useMemo(() => {
+    console.log("Dashboard useMemo: Calculating total stock value...");
+    return products.reduce(
+      (total, product) => total + (Number(product.quantity) * Number(product.mrp) || 0),
+      0
+    );
+  }, [products]);
+
+  const lowStockProducts = useMemo(() => {
+    console.log("Dashboard useMemo: Calculating low stock products...");
+    return products.filter(
+      (product) => product.quantity <= product.minStock && product.quantity > 0
+    );
+  }, [products]);
+
+  const outOfStockProducts = useMemo(() => {
+    console.log("Dashboard useMemo: Calculating out of stock products...");
+    return products.filter((product) => product.quantity === 0);
+  }, [products]);
+
+  // Calculate total purchase value
+  const totalPurchaseValue = useMemo(() => {
+    console.log("Dashboard useMemo: Calculating total purchase value...");
+    return purchaseBills.reduce(
+      (total, bill) => total + (Number(bill.totalAmount) || 0),
+      0
+    );
+  }, [purchaseBills]);
+
+  // Calculate total sales value
+  const totalSalesValue = useMemo(() => {
+    console.log("Dashboard useMemo: Calculating total sales value...");
+    return salesBills.reduce(
+      (total, bill) => total + (Number(bill.totalAmount) || 0),
+      0
+    );
+  }, [salesBills]);
+
+
+  // --- UI Handlers ---
+
+  const toggleRowExpansion = (productId) => {
+    console.log(`Toggling expansion for product ID: ${productId}`);
+    setExpandedRow(expandedRow === productId ? null : productId);
   };
 
-  export default function Home() {
-    const [products, setProducts] = useState([]);
-    const [purchaseBills, setPurchaseBills] = useState([]);
-    const [salesBills, setSalesBills] = useState([]);
-    const [todayPurchaseBills, setTodayPurchaseBills] = useState([]);
-    const [todaySalesBills, setTodaySalesBills] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [totalQuantity, setTotalQuantity] = useState(0);
-    const [totalValue, setTotalValue] = useState(0);
-    const [expandedRows, setExpandedRows] = useState({});
-    const [searchQuery, setSearchQuery] = useState("");
-    const [expiringSoonProducts, setExpiringSoonProducts] = useState([]);
-
-    // --- EFFECT: Load initial data and set up event listener ---
-    useEffect(() => {
-      console.log(
-        "Dashboard useEffect: Component mounted. Starting initial data load."
-      );
-      try {
-        const initialProducts = loadProductsFromLocalStorage();
-        const initialPurchaseBills = loadPurchaseBillsFromLocalStorage();
-        const initialSalesBills = loadSalesBillsFromLocalStorage();
-
-        setProducts(initialProducts);
-        setPurchaseBills(initialPurchaseBills);
-        setSalesBills(initialSalesBills);
-        setLoading(false); // Set loading to false after initial data is loaded
-      } catch (initialLoadError) {
-        console.error(
-          "Dashboard useEffect: Unexpected error during initial load:",
-          initialLoadError
-        );
-        setProducts([]);
-        setPurchaseBills([]);
-        setSalesBills([]);
-        setLoading(false); // Set loading to false even on error
-        toast.error("An unexpected error occurred during initial data load.");
-      }
-
-      const handleDataUpdated = () => {
-        console.log(
-          "Dashboard: 'productsUpdated' event received. Reloading all relevant data from storage."
-        );
-        const updatedProducts = loadProductsFromLocalStorage();
-        const updatedPurchaseBills = loadPurchaseBillsFromLocalStorage();
-        const updatedSalesBills = loadSalesBillsFromLocalStorage();
-        setProducts(updatedProducts);
-        setPurchaseBills(updatedPurchaseBills);
-        setSalesBills(updatedSalesBills);
-      };
-
-      window.addEventListener("productsUpdated", handleDataUpdated);
-      return () => {
-        window.removeEventListener("productsUpdated", handleDataUpdated);
-      };
-    }, []);
-
-    // --- EFFECT: Filter for Today's Transactions ---
-    useEffect(() => {
-      const todayFormatted = formatDate(new Date());
-      const salesToday = salesBills.filter(
-        (bill) => bill.date === todayFormatted
-      );
-      const purchaseToday = purchaseBills.filter(
-        (bill) => bill.date === todayFormatted
-      );
-      setTodaySalesBills(salesToday);
-      setTodayPurchaseBills(purchaseToday);
-    }, [salesBills, purchaseBills]);
-
-    // --- Stock Calculation Logic (Memoized for performance) ---
-    const batchStock = useMemo(() => {
-      console.log("Dashboard: Calculating batch stock...");
-      const stockMap = new Map();
-
-      purchaseBills.forEach((bill) => {
-        bill.items.forEach((item) => {
-          if (item.product && item.batch && item.expiry) {
-            const key = `${item.product.trim().toLowerCase()}_${item.batch
-              .trim()
-              .toLowerCase()}_${item.expiry.trim().toLowerCase()}`;
-            const quantity = Number(item.quantity) || 0;
-            stockMap.set(key, (stockMap.get(key) || 0) + quantity);
-          }
-        });
-      });
-
-      salesBills.forEach((bill) => {
-        bill.items.forEach((item) => {
-          if (item.product && item.batch && item.expiry) {
-            const key = `${item.product.trim().toLowerCase()}_${item.batch
-              .trim()
-              .toLowerCase()}_${item.expiry.trim().toLowerCase()}`;
-            const quantitySold = Number(item.quantitySold) || 0;
-            stockMap.set(key, (stockMap.get(key) || 0) - quantitySold);
-          }
-        });
-      });
-
-      const productBatchStock = new Map();
-      stockMap.forEach((quantity, key) => {
-        const [productNameLower, batchLower, expiryLower] = key.split("_");
-        const originalProduct = products.find(
-          (p) => p && p.name && p.name.toLowerCase() === productNameLower
-        );
-
-        if (!originalProduct) {
-          console.warn(
-            `Dashboard: Calculated batch stock for unknown product: "${productNameLower}". Skipping display.`
-          );
-          return;
-        }
-        const displayProductName = originalProduct.name;
-
-        if (!productBatchStock.has(displayProductName)) {
-          productBatchStock.set(displayProductName, []);
-        }
-
-        if (quantity > 0) { // Only include batches with positive stock
-          let displayBatch = batchLower;
-          let displayExpiry = expiryLower;
-          const purchaseItemMatch = purchaseBills
-            .flatMap((bill) => bill.items)
-            .find(
-              (item) =>
-                item.product?.trim().toLowerCase() === productNameLower &&
-                item.batch?.trim().toLowerCase() === batchLower &&
-                item.expiry?.trim().toLowerCase() === expiryLower
-            );
-          if (purchaseItemMatch) {
-            displayBatch = purchaseItemMatch.batch.trim();
-            displayExpiry = purchaseItemMatch.expiry.trim();
-          }
-
-          productBatchStock.get(displayProductName).push({
-            batch: displayBatch,
-            expiry: displayExpiry,
-            quantity: quantity,
+  // Function to get purchase history for a specific product
+  const getPurchaseHistory = (productName) => {
+    const history = [];
+    purchaseBills.forEach((bill) => {
+      bill.items.forEach((item) => {
+        if (item.product.toLowerCase() === productName.toLowerCase()) {
+          history.push({
+            billNumber: bill.billNumber,
+            date: bill.date,
+            supplier: bill.supplierName,
+            batch: item.batch,
+            expiry: item.expiry,
+            quantity: item.quantity,
+            ptr: item.ptr,
+            itemsPerPack: item.itemsPerPack,
+            mrp: item.mrp, // Entered/Confirmed MRP from Purchase
+            originalMrp: item.originalMrp, // Original Master MRP from Purchase
+            discount: item.discount,
+            totalItemAmount: item.totalItemAmount,
           });
         }
       });
+    });
+    // Sort history by date, newest first
+    history.sort((a, b) => {
+      const dateA = parseDate(a.date);
+      const dateB = parseDate(b.date);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateB - dateA;
+    });
+    return history;
+  };
 
-      productBatchStock.forEach((batches) => {
-        batches.sort((a, b) => {
-          const dateA = parseMonthYearDate(a.expiry);
-          const dateB = parseMonthYearDate(b.expiry);
-          if (!dateA && !dateB) return 0;
-          if (!dateA) return 1;
-          if (!dateB) return -1;
-          return dateA - dateB;
-        });
+  // Function to get sales history for a specific product
+  const getSalesHistory = (productName) => {
+    const history = [];
+    salesBills.forEach((bill) => {
+      bill.items.forEach((item) => {
+        if (item.product.toLowerCase() === productName.toLowerCase()) {
+          history.push({
+            billNumber: bill.billNumber,
+            date: bill.date,
+            customer: bill.customerName,
+            batch: item.batch,
+            expiry: item.expiry,
+            quantitySold: item.quantitySold,
+            pricePerItem: item.pricePerItem,
+            discount: item.discount,
+            totalItemAmount: item.totalItemAmount,
+            saleMrp: item.productMrp, // MRP used for the sale
+            purchasedMrp: item.purchasedMrp, // Purchased MRP from the Purchase record
+          });
+        }
       });
-      console.log("Dashboard: Batch stock calculated.", Object.fromEntries(productBatchStock));
-      return productBatchStock;
-    }, [products, purchaseBills, salesBills]);
+    });
+    // Sort history by date, newest first
+    history.sort((a, b) => {
+      const dateA = parseDate(a.date);
+      const dateB = parseDate(b.date);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateB - dateA;
+    });
+    return history;
+  };
 
-    // --- EFFECT: Update Overall Stock Summary based on batchStock ---
-    useEffect(() => {
-      let newTotalQuantity = 0;
-      let newTotalValue = 0;
+  // Function to calculate stock by batch for a product
+  const getStockByBatch = (productName) => {
+    const batchMap = new Map(); // Key: batch_expiry, Value: quantity
 
-      batchStock.forEach((batches, productName) => {
-        const productMasterInfo = products.find(p => p.name === productName);
-        const mrp = productMasterInfo ? Number(productMasterInfo.mrp) || 0 : 0;
-
-        batches.forEach(batch => {
-          newTotalQuantity += batch.quantity;
-          newTotalValue += batch.quantity * mrp;
-        });
+    // Add quantities from purchase bills
+    purchaseBills.forEach((bill) => {
+      bill.items.forEach((item) => {
+        if (item.product.toLowerCase() === productName.toLowerCase()) {
+          const key = `${item.batch.trim()}_${item.expiry.trim()}`;
+          batchMap.set(key, (batchMap.get(key) || 0) + Number(item.quantity));
+        }
       });
+    });
 
-      setTotalQuantity(newTotalQuantity);
-      setTotalValue(newTotalValue);
-      console.log(`Dashboard: Overall stock summary updated. Total Qty: ${newTotalQuantity}, Total Value: ${newTotalValue.toFixed(2)}`);
-    }, [batchStock, products]);
-
-    // --- EFFECT: Calculate Products Nearing Expiry (Next 2 Months) ---
-    useEffect(() => {
-      console.log("Dashboard: Calculating products nearing expiry...");
-      const today = new Date();
-      const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
-      const targetMonth = new Date(firstDayOfCurrentMonth);
-      targetMonth.setMonth(firstDayOfCurrentMonth.getMonth() + 2);
-      const lastDayOfTwoMonthsFromNow = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0);
-
-      console.log("Dashboard Expiry Check: Today:", today.toDateString());
-      console.log("Dashboard Expiry Check: Expiry check up to (inclusive):", lastDayOfTwoMonthsFromNow.toDateString());
-
-      const nearingExpiry = [];
-
-      batchStock.forEach((batches, productName) => {
-        const originalProduct = products.find(p => p.name === productName);
-
-        batches.forEach(batch => {
-          const expiryDate = parseMonthYearDate(batch.expiry);
-          if (expiryDate) {
-            if (expiryDate <= lastDayOfTwoMonthsFromNow) {
-              if (batch.quantity > 0) {
-                nearingExpiry.push({
-                  productName: productName,
-                  category: originalProduct?.category || "N/A",
-                  company: originalProduct?.company || "N/A",
-                  batch: batch.batch,
-                  expiry: batch.expiry,
-                  quantity: batch.quantity,
-                  id: originalProduct ? `${originalProduct.id}-${batch.batch}-${batch.expiry}` : `${productName}-${batch.batch}-${batch.expiry}`,
-                });
-              }
-            }
-          }
-        });
+    // Subtract quantities from sales bills
+    salesBills.forEach((bill) => {
+      bill.items.forEach((item) => {
+        if (item.product.toLowerCase() === productName.toLowerCase()) {
+          const key = `${item.batch.trim()}_${item.expiry.trim()}`;
+          batchMap.set(
+            key,
+            Math.max(0, (batchMap.get(key) || 0) - Number(item.quantitySold))
+          );
+        }
       });
+    });
 
-      nearingExpiry.sort((a, b) => {
-        const dateA = parseMonthYearDate(a.expiry);
-        const dateB = parseMonthYearDate(b.expiry);
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
-        if (!dateB) return -1;
-        return dateA - dateB;
-      });
-
-      setExpiringSoonProducts(nearingExpiry);
-      console.log(
-        "Dashboard: Products nearing expiry calculated.",
-        nearingExpiry.length, "items found."
-      );
-    }, [batchStock, products]);
-
-
-    // Function to calculate total stock for a product based on batch stock
-    const getTotalStock = (productName) => {
-      const originalProduct = products.find(
-        (p) => p && p.name && p.name.toLowerCase() === productName.toLowerCase()
-      );
-      if (!originalProduct) return 0;
-
-      const batches = batchStock.get(originalProduct.name) || [];
-      const total = batches.reduce((sum, batch) => sum + batch.quantity, 0);
-      return total;
-    };
-
-    const handleSearchChange = (e) => {
-      setSearchQuery(e.target.value);
-      setExpandedRows({}); // Collapse rows when searching
-    };
-
-    const filteredProducts = useMemo(() => {
-      const query = searchQuery.toLowerCase();
-      if (!query) {
-        return products;
+    // Convert map to array of objects
+    const batchStockList = Array.from(batchMap.entries()).map(
+      ([key, quantity]) => {
+        const [batch, expiry] = key.split("_");
+        return { batch, expiry, quantity };
       }
-      return products.filter(
-        (product) =>
-          product &&
-          product.name &&
-          (product.name.toLowerCase().includes(query) ||
-            (product.unit && product.unit.toLowerCase().includes(query)) ||
-            (product.category && product.category.toLowerCase().includes(query)) ||
-            (product.company && product.company.toLowerCase().includes(query)) ||
-            (batchStock.has(product.name) &&
-              batchStock
-                .get(product.name)
-                .some(
-                  (batchDetail) =>
-                    batchDetail.batch.toLowerCase().includes(query) ||
-                    batchDetail.expiry.toLowerCase().includes(query)
-                )))
-      );
-    }, [searchQuery, products, batchStock]);
+    );
 
-    const toggleRowExpansion = (productId) => {
-      setExpandedRows((prevExpandedRows) => ({
-        ...prevExpandedRows,
-        [productId]: !prevExpandedRows[productId],
-      }));
-    };
+    // Filter out batches with zero stock and sort by expiry date
+    batchStockList.sort((a, b) => {
+      const dateA = parseDate(`01-${a.expiry}`); // Assuming expiry is MM-YY
+      const dateB = parseDate(`01-${b.expiry}`);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA - dateB; // Sort by oldest expiry first
+    });
 
-    const exportToCsv = (data, filename, type) => {
-      if (!data || data.length === 0) {
-        toast.info(`No ${type} data to export.`);
-        return;
-      }
-      let headers = [];
-      let csvRows = [];
+    return batchStockList;
+  };
 
-      if (type === "sales") {
-        headers = ["Bill Number", "Customer Name", "Date", "Total Amount"];
-        csvRows = data.map((bill) =>
-          [
-            `"${bill.billNumber || ""}"`,
-            `"${bill.customerName || ""}"`,
-            `"${bill.date || ""}"`,
-            (Number(bill.totalAmount) || 0).toFixed(2),
-          ].join(",")
-        );
-      } else if (type === "purchase") {
-        headers = ["Bill Number", "Supplier Name", "Date", "Total Amount"];
-        csvRows = data.map((bill) =>
-          [
-            `"${bill.billNumber || ""}"`,
-            `"${bill.supplierName || ""}"`,
-            `"${bill.date || ""}"`,
-            (Number(bill.totalAmount) || 0).toFixed(2),
-          ].join(",")
-        );
-      } else {
-        return;
-      }
+  // Function to trigger data export (placeholder)
+  const handleExportData = () => {
+    toast.info("Export functionality coming soon!");
+    console.log("Export data button clicked.");
+    // Implement actual data export logic here (e.g., to CSV, JSON)
+  };
 
-      const headerRow = headers.join(",");
-      csvRows.unshift(headerRow);
-      const csvString = csvRows.join("\n");
-      const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      link.setAttribute("href", url);
-      link.setAttribute("download", `${filename}_${formatDate(new Date())}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast.success(
-        `${type.charAt(0).toUpperCase() + type.slice(1)} history exported!`
-      );
-    };
-
-    const exportSalesCSV = () => exportToCsv(salesBills, "sales_history", "sales");
-    const exportPurchaseCSV = () => exportToCsv(purchaseBills, "purchase_history", "purchase");
-
-
+  if (loading) {
     return (
-      <>
-        <Header />
-        {loading ? (
-          // Loader component
-          <div className="fixed inset-0 flex items-center justify-center bg-white z-50">
-            <div className="loader"></div>
-            <p className="ml-4 text-gray-600">Loading...</p>
-          </div>
-        ) : (
-          // Main page content with fade-in animation
-          <div className="container mx-auto p-4 antialiased text-gray-800 fade-in"> {/* Added fade-in class */}
-            <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-                <h1 className="text-3xl font-bold text-gray-700">Dashboard</h1>
-                <div className="flex flex-wrap gap-2">
-                  <Link href="/sales">
-                    <Button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow hover:shadow-md transition-all duration-150">
-                      Go to Sales
-                    </Button>
-                  </Link>
-                  <Link href="/purchase">
-                    <Button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow hover:shadow-md transition-all duration-150">
-                      Go to Purchase
-                    </Button>
-                  </Link>
-                  <Link href="/productmaster">
-                    <Button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow hover:shadow-md transition-all duration-150">
-                      Product Master
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-
-              {/* Overall Stock Summary Section */}
-              <div className="bg-gradient-to-r from-slate-50 to-gray-100 p-6 rounded-xl shadow-lg mb-8">
-                <h2 className="text-2xl font-semibold text-gray-700 mb-3">Overall Stock Summary</h2>
-                <TotalSummary totalQuantity={totalQuantity} totalValue={totalValue} />
-              </div>
-
-              {/* Products Nearing Expiry Section */}
-              <div className="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-8">
-                <div className="flex items-center mb-4">
-                  <AlertTriangle className="h-6 w-6 text-orange-500 mr-3 shrink-0" />
-                  <h2 className="text-xl font-semibold text-orange-600">
-                    Products Nearing Expiry (Next 2 Months)
-                  </h2>
-                </div>
-                {loading ? (
-                  <div className="text-center text-gray-500 py-4">Loading expiry data...</div>
-                ) : expiringSoonProducts.length > 0 ? (
-                  <div className="overflow-x-auto rounded-lg border border-orange-200">
-                    <table className="min-w-full table-auto">
-                      <thead className="bg-orange-50">
-                        <tr className="text-left text-sm text-orange-700">
-                          <th className="px-4 py-3 font-medium">Product Name</th>
-                          <th className="px-4 py-3 font-medium">Batch No.</th>
-                          <th className="px-4 py-3 font-medium">Expiry (MM-YY)</th>
-                          <th className="px-4 py-3 font-medium text-right">Stock (Items)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-orange-100">
-                        {expiringSoonProducts.map((product) => (
-                          <tr key={product.id} className="hover:bg-orange-50/50 transition-colors duration-150">
-                            <td className="px-4 py-3 text-sm text-gray-700 font-medium">
-                              {product.productName}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{product.batch}</td>
-                            <td className="px-4 py-3 text-sm text-red-600 font-semibold">
-                              {product.expiry}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-600 text-right font-medium">{product.quantity}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="text-gray-600 py-4 text-center">
-                    No products nearing expiry in the next two months.
-                  </p>
-                )}
-              </div>
-
-
-              {/* Current Stock Inventory Section */}
-              <div className="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-8">
-                <h2 className="text-2xl font-semibold text-gray-700 mb-4">
-                  Current Stock Inventory
-                </h2>
-                <div className="mb-4">
-                  <input
-                    type="text"
-                    placeholder="Search products, batches, categories..."
-                    value={searchQuery}
-                    onChange={handleSearchChange}
-                    className="border border-gray-300 p-3 rounded-lg w-full md:w-2/5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow"
-                  />
-                </div>
-                {loading ? (
-                  <div className="text-center text-gray-500 py-8">
-                    Loading stock data...
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-lg border border-gray-200">
-                    <table className="min-w-full table-auto">
-                      <thead className="bg-gray-50">
-                        <tr className="text-left text-sm text-gray-600">
-                          <th className="px-4 py-3 font-medium w-[25%]">Product Name</th>
-                          <th className="px-4 py-3 font-medium w-[10%]">Unit</th>
-                          <th className="px-4 py-3 font-medium w-[15%]">Category</th>
-                          <th className="px-4 py-3 font-medium w-[15%]">Company</th>
-                          <th className="px-4 py-3 font-medium w-[10%] text-right">MRP (₹)</th>
-                          <th className="px-4 py-3 font-medium w-[10%] text-center">Items/Pack</th>
-                          <th className="px-4 py-3 font-medium w-[15%] text-right">Total Stock (Items)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {filteredProducts.length > 0 ? (
-                          filteredProducts.map((product) => (
-                            <React.Fragment key={product.id}>
-                              <tr
-                                className={`hover:bg-gray-50 transition-colors duration-150 ${
-                                  expandedRows[product.id] ? "bg-indigo-50" : ""
-                                } cursor-pointer`}
-                                onClick={() => toggleRowExpansion(product.id)}
-                              >
-                                <td className="px-4 py-3 text-sm text-gray-700 font-medium flex items-center">
-                                  {expandedRows[product.id] ? (
-                                    <ChevronUp className="h-4 w-4 mr-2 shrink-0 text-indigo-600" />
-                                  ) : (
-                                    <ChevronDown className="h-4 w-4 mr-2 shrink-0 text-gray-500" />
-                                  )}
-                                  <span className="truncate">{product.name}</span>
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-600">{product.unit}</td>
-                                <td className="px-4 py-3 text-sm text-gray-600">{product.category}</td>
-                                <td className="px-4 py-3 text-sm text-gray-600">{product.company}</td>
-                                <td className="px-4 py-3 text-sm text-gray-600 text-right">
-                                  {Number(product.mrp).toFixed(2)}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-600 text-center">
-                                  {product.itemsPerPack}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-700 font-semibold text-right">
-                                  {getTotalStock(product.name)}
-                                </td>
-                              </tr>
-
-                              {expandedRows[product.id] && (
-                                // Expanded row content with slide animation wrapper
-                                <tr key={`batch-details-${product.id}`} className="bg-gray-50">
-                                  <td colSpan="7" className="px-4 py-0"> {/* Set vertical padding to 0 */}
-                                    <div className="expandable-content"> {/* Wrapper div */}
-                                      <div className="p-3 bg-white rounded-md border border-gray-200 my-3"> {/* Add margin back inside */}
-                                        <h4 className="font-semibold text-sm text-gray-700 mb-2">
-                                          Batch Stock Details:
-                                        </h4>
-                                        {batchStock.has(product.name) &&
-                                        batchStock.get(product.name).length > 0 ? (
-                                          <div className="overflow-x-auto">
-                                            <table className="min-w-full table-auto text-xs">
-                                              <thead className="bg-gray-100">
-                                                <tr className="text-left text-gray-600">
-                                                  <th className="px-2 py-2 font-medium">Batch No.</th>
-                                                  <th className="px-2 py-2 font-medium">Expiry (MM-YY)</th>
-                                                  <th className="px-2 py-2 font-medium text-right">Stock (Items)</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-gray-100">
-                                                {batchStock
-                                                  .get(product.name)
-                                                  .map((batchDetail, batchIndex) => (
-                                                    <tr key={batchIndex} className="hover:bg-gray-100/50">
-                                                      <td className="px-2 py-2 text-gray-700">{batchDetail.batch}</td>
-                                                      <td className={`px-2 py-2 ${parseMonthYearDate(batchDetail.expiry) < new Date() ? 'text-red-500 font-semibold' : 'text-gray-700'}`}>
-                                                        {batchDetail.expiry}
-                                                      </td>
-                                                      <td className="px-2 py-2 text-gray-700 font-medium text-right">{batchDetail.quantity}</td>
-                                                    </tr>
-                                                  ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        ) : (
-                                          <p className="text-gray-500 text-sm">
-                                            No batch details or zero stock for this product.
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          ))
-                        ) : (
-                          <tr>
-                            <td
-                              colSpan="7"
-                              className="px-4 py-8 text-center text-gray-500"
-                            >
-                              No products found matching your search.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* --- Today's Transactions and History Section --- */}
-              <div className="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-6">
-                <h2 className="text-2xl font-semibold text-gray-700 mb-6">
-                  Transaction Summary & History
-                </h2>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                  <div className="border border-gray-200 p-4 rounded-lg bg-slate-50">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                      Today's Sales ({formatDate(new Date())})
-                    </h3>
-                    {loading ? (
-                      <p className="text-sm text-gray-500">Loading sales data...</p>
-                    ) : (
-                    <>
-                      <p className="text-sm text-gray-600">
-                        Total Bills:{" "}
-                        <span className="font-medium text-gray-800">{todaySalesBills.length}</span>
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        Total Amount:{" "}
-                        <span className="font-medium text-gray-800">
-                          ₹
-                          {todaySalesBills
-                            .reduce((sum, bill) => sum + (Number(bill.totalAmount) || 0), 0)
-                            .toFixed(2)}
-                        </span>
-                      </p>
-                    </>
-                    )}
-                  </div>
-                  <div className="border border-gray-200 p-4 rounded-lg bg-slate-50">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                      Today's Purchases ({formatDate(new Date())})
-                    </h3>
-                    {loading ? (
-                      <p className="text-sm text-gray-500">Loading purchase data...</p>
-                    ) : (
-                    <>
-                      <p className="text-sm text-gray-600">
-                        Total Bills:{" "}
-                        <span className="font-medium text-gray-800">{todayPurchaseBills.length}</span>
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        Total Amount:{" "}
-                        <span className="font-medium text-gray-800">
-                          ₹
-                          {todayPurchaseBills
-                            .reduce((sum, bill) => sum + (Number(bill.totalAmount) || 0), 0)
-                            .toFixed(2)}
-                        </span>
-                      </p>
-                    </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="text-xl font-semibold text-gray-700">Sales History</h3>
-                      <Button
-                        onClick={exportSalesCSV}
-                        size="sm"
-                        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs shadow hover:shadow-md transition-all"
-                      >
-                        <Download className="mr-1.5 h-3.5 w-3.5" /> Export Sales
-                      </Button>
-                    </div>
-                    {loading ? (
-                      <div className="px-3 py-6 text-center text-gray-500">Loading sales history...</div>
-                    ) : (
-                      <div className="overflow-x-auto rounded-lg border border-gray-200 max-h-96">
-                        <table className="min-w-full table-auto text-sm">
-                          <thead className="bg-gray-50 sticky top-0">
-                            <tr className="text-left text-gray-600">
-                              <th className="px-3 py-2.5 font-medium">Bill No</th>
-                              <th className="px-3 py-2.5 font-medium">Date</th>
-                              <th className="px-3 py-2.5 font-medium">Customer</th>
-                              <th className="px-3 py-2.5 font-medium text-right">Total (₹)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {salesBills.length > 0 ? (
-                              salesBills.map((bill) => (
-                                <tr key={bill.id || bill.billNumber} className="hover:bg-gray-50/50 transition-colors">
-                                  <td className="px-3 py-2.5 text-gray-700">{bill.billNumber}</td>
-                                  <td className="px-3 py-2.5 text-gray-600">{bill.date}</td>
-                                  <td className="px-3 py-2.5 text-gray-600 truncate max-w-[120px] sm:max-w-[150px]">
-                                    {bill.customerName}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-gray-700 text-right">
-                                    {(Number(bill.totalAmount) || 0).toFixed(2)}
-                                  </td>
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan="4" className="px-3 py-6 text-center text-gray-500">
-                                  No sales bills found.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="text-xl font-semibold text-gray-700">Purchase History</h3>
-                      <Button
-                        onClick={exportPurchaseCSV}
-                        size="sm"
-                        className="bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-md text-xs shadow hover:shadow-md transition-all"
-                      >
-                        <Download className="mr-1.5 h-3.5 w-3.5" /> Export Purchase
-                      </Button>
-                    </div>
-                    {loading ? (
-                      <div className="px-3 py-6 text-center text-gray-500">Loading purchase history...</div>
-                    ) : (
-                      <div className="overflow-x-auto rounded-lg border border-gray-200 max-h-96">
-                        <table className="min-w-full table-auto text-sm">
-                          <thead className="bg-gray-50 sticky top-0">
-                            <tr className="text-left text-gray-600">
-                              <th className="px-3 py-2.5 font-medium">Bill No</th>
-                              <th className="px-3 py-2.5 font-medium">Date</th>
-                              <th className="px-3 py-2.5 font-medium">Supplier</th>
-                              <th className="px-3 py-2.5 font-medium text-right">Total (₹)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {purchaseBills.length > 0 ? (
-                              purchaseBills.map((bill) => (
-                                <tr key={bill.id || bill.billNumber} className="hover:bg-gray-50/50 transition-colors">
-                                  <td className="px-3 py-2.5 text-gray-700">{bill.billNumber}</td>
-                                  <td className="px-3 py-2.5 text-gray-600">{bill.date}</td>
-                                  <td className="px-3 py-2.5 text-gray-600 truncate max-w-[120px] sm:max-w-[150px]">
-                                    {bill.supplierName}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-gray-700 text-right">
-                                    {(Number(bill.totalAmount) || 0).toFixed(2)}
-                                  </td>
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan="4" className="px-3 py-6 text-center text-gray-500">
-                                  No purchase bills found.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-          </div>
-        )}
-
-        <style jsx>{`
-          /* Loader styles */
-          .loader {
-            border: 4px solid #f3f3f3; /* Light grey */
-            border-top: 4px solid #3498db; /* Blue */
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-          }
-
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-
-          /* Fade-in animation for the main content */
-          .fade-in {
-            animation: fadeIn 0.5s ease-out forwards;
-            opacity: 0; /* Start invisible */
-          }
-
-          @keyframes fadeIn {
-            0% { opacity: 0; transform: translateY(20px); } /* Optional: slight slide up */
-            100% { opacity: 1; transform: translateY(0); }
-          }
-
-          /* Slide animation for expandable row content */
-          .expandable-content {
-            overflow: hidden; /* Hide content when collapsed */
-            transition: max-height 0.3s ease-out; /* Smooth transition */
-            max-height: 0; /* Start collapsed */
-          }
-
-          /* This class is applied by React when the row is expanded */
-          tr.bg-indigo-50 + tr .expandable-content {
-            /* A large enough value to accommodate the content */
-            max-height: 500px; /* Adjust this value based on your content's potential height */
-          }
-
-        `}</style>
-      </>
+      <div className="flex justify-center items-center h-screen">
+        <div className="loader"></div>
+        <p className="ml-4 text-gray-700">Loading data...</p>
+      </div>
     );
   }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center h-screen text-red-600">
+        <p>{error}</p>
+      </div>
+    );
+  }
+
+  // Render logic starts here
+  return (
+    <div>
+      <Header />
+      <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 bg-gray-100 rounded-lg shadow-inner fade-in">
+        <div className="flex justify-between items-center mb-8">
+          <h2 className="text-3xl font-bold text-gray-800">Dashboard</h2>
+          <div className="flex space-x-3">
+            <Link href="/product-master" passHref>
+              <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
+                Product Master
+              </Button>
+            </Link>
+            <Link href="/purchase" passHref>
+              <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200">
+                New Purchase
+              </Button>
+            </Link>
+            <Link href="/sales" passHref>
+              <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200">
+                New Sale
+              </Button>
+            </Link>
+            {/* Export Button */}
+            <Button
+              onClick={handleExportData}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+            >
+              <Download className="mr-2 h-4 w-4" /> Export Data
+            </Button>
+          </div>
+        </div>
+
+        {/* Summary Section - Uncommented and modified */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {/* Total Stock Value */}
+          <TotalSummary
+            title="Total Stock Value (Current MRP)"
+            value={`₹${totalStockValue.toFixed(2)}`}
+            description="Value of current inventory based on latest Master MRP"
+            bgColor="bg-blue-500"
+          />
+          <TotalSummary
+            title="Total Purchase Value"
+            value={`₹${totalPurchaseValue.toFixed(2)}`}
+            description="Total value of all recorded purchases"
+            bgColor="bg-green-500"
+          />
+          <TotalSummary
+            title="Total Sales Value"
+            value={`₹${totalSalesValue.toFixed(2)}`}
+            description="Total value of all recorded sales"
+            bgColor="bg-purple-500"
+          />
+        </div>
+
+
+        {/* Product Stock List */}
+        <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+          <h3 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">
+            Product Stock Overview
+          </h3>
+          <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Product Name
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Current Stock (Items)
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Unit
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Category
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Company
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Current Master MRP/Pack
+                  </th>
+                   <th
+                    scope="col"
+                    className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Original Purchased MRP/Pack
+                  </th> {/* NEW column header */}
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Status
+                  </th>
+                  <th
+                    scope="col"
+                    className="relative px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    <span className="sr-only">Expand</span>
+                    Details
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {products.length > 0 ? (
+                  products.map((product) => (
+                    <React.Fragment key={product.id}>
+                      {/* Main Product Row */}
+                      <tr
+                        className={`hover:bg-gray-100 transition duration-100 ease-in-out ${
+                          expandedRow === product.id ? "bg-indigo-50" : ""
+                        }`}
+                      >
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {product.name}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          {product.quantity}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          {product.unit}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          {product.category}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          {product.company}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          ₹{Number(product.mrp).toFixed(2)}
+                        </td>
+                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          {product.originalMrp > 0 ? `₹${Number(product.originalMrp).toFixed(2)}` : '-'} {/* Display Original Purchased MRP */}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-center text-sm font-semibold">
+                          {product.quantity === 0 ? (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                              Out of Stock
+                            </span>
+                          ) : product.quantity <= product.minStock ? (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                              Low Stock
+                            </span>
+                          ) : (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                              In Stock
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-center text-sm font-medium">
+                          <Button
+                            size="sm"
+                            onClick={() => toggleRowExpansion(product.id)}
+                            className="p-1 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors duration-200"
+                            title={
+                              expandedRow === product.id
+                                ? "Collapse Details"
+                                : "Expand Details"
+                            }
+                          >
+                            {expandedRow === product.id ? (
+                              <ChevronUp className="h-4 w-4 text-gray-700" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-gray-700" />
+                            )}
+                          </Button>
+                        </td>
+                      </tr>
+                      {/* Expandable Content Row */}
+                      {/* Apply dynamic max-height based on expandedRow state */}
+                      <tr className={`${expandedRow === product.id ? 'bg-indigo-50' : 'hidden'}`}>
+                          <td colSpan="9" className="p-4">
+                            {" "}
+                            {/* Adjusted colspan */}
+                            <div className={`expandable-content ${expandedRow === product.id ? 'expanded' : ''}`}>
+                              {/* Batch Stock Details */}
+                              <div className="mb-6">
+                                <h4 className="text-md font-semibold text-gray-800 mb-2">
+                                  Stock by Batch:
+                                </h4>
+                                <div className="overflow-x-auto border border-gray-300 rounded-md shadow-sm">
+                                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead className="bg-gray-100">
+                                      <tr>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Batch No.
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Expiry (MM-YY)
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Current Stock (Items)
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                      {getStockByBatch(product.name).length >
+                                      0 ? (
+                                        getStockByBatch(product.name).map(
+                                          (batch, batchIndex) => (
+                                            <tr
+                                              key={batchIndex}
+                                              className="hover:bg-gray-50"
+                                            >
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {batch.batch}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {batch.expiry}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {batch.quantity}
+                                              </td>
+                                            </tr>
+                                          )
+                                        )
+                                      ) : (
+                                        <tr>
+                                          <td
+                                            colSpan="3"
+                                            className="px-3 py-2 text-center text-sm text-gray-500"
+                                          >
+                                            No stock details by batch available.
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* Purchase History */}
+                              <div className="mb-6">
+                                <h4 className="text-md font-semibold text-gray-800 mb-2">
+                                  Purchase History:
+                                </h4>
+                                <div className="overflow-x-auto border border-gray-300 rounded-md shadow-sm">
+                                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead className="bg-gray-100">
+                                      <tr>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Bill No
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Date
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Supplier
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Batch
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Expiry
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Qty (Items)
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          PTR/Pack
+                                        </th>
+                                         <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Entered MRP/Pack
+                                        </th> {/* Display Entered MRP from Purchase */}
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Original Master MRP/Pack
+                                        </th> {/* Display Original Master MRP from Purchase */}
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Discount (%)
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Item Total
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                      {getPurchaseHistory(product.name).length >
+                                      0 ? (
+                                        getPurchaseHistory(product.name).map(
+                                          (purchase, purchaseIndex) => (
+                                            <tr
+                                              key={purchaseIndex}
+                                              className="hover:bg-gray-50"
+                                            >
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.billNumber}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.date}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.supplier}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.batch}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.expiry}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.quantity}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(purchase.ptr).toFixed(2)}
+                                              </td>
+                                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(purchase.mrp).toFixed(2)}
+                                              </td> {/* Display Entered MRP from Purchase */}
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {purchase.originalMrp > 0 ? `₹${Number(purchase.originalMrp).toFixed(2)}` : '-'} {/* Display Original Master MRP from Purchase */}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {Number(purchase.discount).toFixed(2)}%
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(purchase.totalItemAmount).toFixed(2)}
+                                              </td>
+                                            </tr>
+                                          )
+                                        )
+                                      ) : (
+                                        <tr>
+                                          <td
+                                            colSpan="11" /* Adjusted colspan */
+                                            className="px-3 py-2 text-center text-sm text-gray-500"
+                                          >
+                                            No purchase history found for this
+                                            product.
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* Sales History */}
+                              <div>
+                                <h4 className="text-md font-semibold text-gray-800 mb-2">
+                                  Sales History:
+                                </h4>
+                                <div className="overflow-x-auto border border-gray-300 rounded-md shadow-sm">
+                                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead className="bg-gray-100">
+                                      <tr>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Bill No
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Date
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Customer
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Batch
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Expiry
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Qty Sold (Items)
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Price/Item
+                                        </th>
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Discount (%)
+                                        </th>
+                                         <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Sale MRP/Pack
+                                        </th> {/* Display MRP used for this sale */}
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Purchased MRP/Pack
+                                        </th> {/* Display Purchased MRP */}
+                                        <th
+                                          scope="col"
+                                          className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                                        >
+                                          Item Total
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                      {getSalesHistory(product.name).length >
+                                      0 ? (
+                                        getSalesHistory(product.name).map(
+                                          (sale, saleIndex) => (
+                                            <tr
+                                              key={saleIndex}
+                                              className="hover:bg-gray-50"
+                                            >
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.billNumber}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.date}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.customer}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.batch}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.expiry}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.quantitySold}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(sale.pricePerItem).toFixed(2)}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {Number(sale.discount).toFixed(2)}%
+                                              </td>
+                                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(sale.saleMrp).toFixed(2)}
+                                              </td> {/* Display Sale MRP */}
+                                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {sale.purchasedMrp > 0 ? `₹${Number(sale.purchasedMrp).toFixed(2)}` : '-'} {/* Display Purchased MRP */}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(sale.totalItemAmount).toFixed(2)}
+                                              </td>
+                                            </tr>
+                                          )
+                                        )
+                                      ) : (
+                                        <tr>
+                                          <td
+                                            colSpan="11" /* Adjusted colspan */
+                                            className="px-3 py-2 text-center text-sm text-gray-500"
+                                          >
+                                            No sales history found for this
+                                            product.
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                    </React.Fragment>
+                  ))
+                ) : (
+                  <tr>
+                    <td
+                      colSpan="9" /* Adjusted colspan */
+                      className="px-3 py-4 text-center text-sm text-gray-500"
+                    >
+                      No products found in the master list.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          </div>
+        )
+
+        {/* Low Stock and Out of Stock Alerts */}
+        {(lowStockProducts.length > 0 || outOfStockProducts.length > 0) && (
+          <div className="mt-8 p-6 bg-yellow-50 border border-yellow-200 rounded-lg shadow-sm">
+            <h3 className="text-xl font-semibold text-yellow-800 mb-4 flex items-center">
+              <AlertTriangle className="h-6 w-6 mr-3 text-yellow-600" /> Stock
+              Alerts
+            </h3>
+            {outOfStockProducts.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-lg font-semibold text-red-700 mb-2">
+                  Out of Stock Products:
+                </h4>
+                <ul className="list-disc list-inside text-red-600">
+                  {outOfStockProducts.map((product) => (
+                    <li key={product.id}>
+                      {product.name} (Batch: {product.batch}, Expiry:{" "}
+                      {product.expiry})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {lowStockProducts.length > 0 && (
+              <div>
+                <h4 className="text-lg font-semibold text-yellow-700 mb-2">
+                  Low Stock Products:
+                </h4>
+                <ul className="list-disc list-inside text-yellow-600">
+                  {lowStockProducts.map((product) => (
+                    <li key={product.id}>
+                      {product.name} (Current Stock: {product.quantity})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <style jsx>{`
+        /* Loader styles */
+        .loader {
+          border: 4px solid #f3f3f3; /* Light grey */
+          border-top: 4px solid #3498db; /* Blue */
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
+        }
+
+        /* Fade-in animation for the main content */
+        .fade-in {
+          animation: fadeIn 0.5s ease-out forwards;
+          opacity: 0; /* Start invisible */
+        }
+
+        @keyframes fadeIn {
+          0% {
+            opacity: 0;
+            transform: translateY(20px);
+          } /* Optional: slight slide up */
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* Slide animation for expandable row content */
+        .expandable-content {
+          overflow: hidden; /* Hide content when collapsed */
+          transition: max-height 0.3s ease-out; /* Smooth transition */
+          max-height: 0; /* Start collapsed */
+        }
+
+        /* This class is applied by React when the row is expanded */
+        tr.bg-indigo-50 + tr .expandable-content {
+          /* A large enough value to accommodate the content */
+          max-height: 1000px;
+        }
+      `}</style>
+    </div>
+  );
+}

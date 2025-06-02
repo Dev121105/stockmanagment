@@ -31,7 +31,7 @@ function parseDate(dateString) {
          const yearInt = parseInt(year, 10);
          // Month is 0-indexed in Date constructor
          if (dayInt >= 1 && dayInt <= 31 && monthInt >= 1 && monthInt <= 12 && yearInt >= 1900 && yearInt <= 2100) {
-             return new Date(yearInt, monthInt - 1, dayInt);
+             return new Date(yearInt, monthInt - 1, 1); // Use day 1 for consistency
          }
      }
     return null; // Default to null if parsing fails
@@ -57,7 +57,7 @@ function parseDate(dateString) {
              return new Date(fullYear, monthInt - 1, 1); // Use day 1 for consistency
          }
      }
-     return null; // Return null for invalid format or values
+    return null; // Return null for invalid format or values
  }
 
 
@@ -66,7 +66,7 @@ const SalesPage = () => {
     const [billNumber, setBillNumber] = useState('');
     const [customerName, setCustomerName] = useState('');
     const [date, setDate] = useState(formatDate(new Date()));
-    const [salesItems, setSalesItems] = useState([{ product: '', quantitySold: '', batch: '', expiry: '', pricePerItem: '', discount: '', unit: '', category: '', company: '', totalItemAmount: '', availableBatches: [], productMrp: '', productItemsPerPack: '' }]);
+    const [salesItems, setSalesItems] = useState([{ product: '', quantitySold: '', batch: '', expiry: '', pricePerItem: '', discount: '', unit: '', category: '', company: '', totalItemAmount: '', availableBatches: [], productMrp: '', productItemsPerPack: '', purchasedMrp: '' }]); // Added purchasedMrp
 
 
     // State for managing bills and products data
@@ -112,7 +112,7 @@ const SalesPage = () => {
               return {
                 ...p,
                 quantity: Number(p.quantity) || 0, // Stock quantity (individual items)
-                mrp: Number(p.mrp) || 0, // Selling price (per item?)
+                mrp: Number(p.mrp) || 0, // Selling price (per item?) - This is the CURRENT Master MRP
                 itemsPerPack: Number(p.itemsPerPack) || 1, // Items per pack
                 minStock: Number(p.minStock) || 0,
                 maxStock: Number(p.maxStock) || 0,
@@ -177,13 +177,16 @@ const SalesPage = () => {
                       batch: item.batch || '',
                       expiry: item.expiry || '',
                       quantity: Number(item.quantity) || 0, // Quantity purchased in this line
-                      packsPurchased: Number(item.packsPurchased) || 0,
+                      packsPurchased: Number(item.packsPurchased) || 0, // Keep if used elsewhere
                       itemsPerPack: Number(item.itemsPerPack) || 1,
                       ptr: Number(item.ptr) || 0,
+                      // Store both MRPs from purchase if they exist
+                      mrp: Number(item.mrp) || 0, // This is the ENTERED/CONFIRMED MRP from Purchase
+                      originalMrp: Number(item.originalMrp) || 0, // This is the ORIGINAL Master MRP from Purchase
                       unit: item.unit || '',
                       category: item.category || '',
                       company: item.company || '',
-                      discount: Number(item.discount) || 0,
+                      discount: Number(item.discount) || 0, // Discount on Purchase
                       taxRate: Number(item.taxRate) || 0,
                     })),
                     totalAmount: Number(bill.totalAmount) || 0,
@@ -235,10 +238,13 @@ const SalesPage = () => {
                         ...item,
                         quantitySold: Number(item.quantitySold) || 0,
                         pricePerItem: Number(item.pricePerItem) || 0,
-                        discount: Number(item.discount) || 0,
+                        discount: Number(item.discount) || 0, // Discount on Sale
                         totalItemAmount: Number(item.totalItemAmount) || 0,
-                        productMrp: Number(item.productMrp) || 0,
+                        // Ensure these fields are loaded from saved sales data
+                        productMrp: Number(item.productMrp) || 0, // This will be the MRP used for the sale
                         productItemsPerPack: Number(item.productItemsPerPack) || 1,
+                        // We need to store the purchased MRP with the sales item as well
+                        purchasedMrp: Number(item.purchasedMrp) || 0, // Load purchased MRP
                         product: item.product || '',
                         batch: item.batch || '',
                         expiry: item.expiry || '',
@@ -399,13 +405,13 @@ const SalesPage = () => {
     // --- Stock Calculation Logic (Memoized) ---
     const batchStock = useMemo(() => {
         console.log("SalesPage useMemo: Calculating batch stock...");
-        const stockMap = new Map();
+        const stockMap = new Map(); // Key: "productName_batch_expiry", Value: current quantity in stock
 
         purchaseBills.forEach(bill => {
             bill.items.forEach(item => {
                 if (item.product && item.batch && item.expiry) {
                     const key = `${item.product.trim().toLowerCase()}_${item.batch.trim().toLowerCase()}_${item.expiry.trim().toLowerCase()}`;
-                    const quantity = Number(item.quantity) || 0;
+                    const quantity = Number(item.quantity) || 0; // Quantity purchased in this line
                     stockMap.set(key, (stockMap.get(key) || 0) + quantity);
                 }
             });
@@ -415,7 +421,7 @@ const SalesPage = () => {
             bill.items.forEach(item => {
                 if (item.product && item.batch && item.expiry) {
                     const key = `${item.product.trim().toLowerCase()}_${item.batch.trim().toLowerCase()}_${item.expiry.trim().toLowerCase()}`;
-                    const quantitySold = Number(item.quantitySold) || 0;
+                    const quantitySold = Number(item.quantitySold) || 0; // Quantity sold in this line
                     stockMap.set(key, Math.max(0, (stockMap.get(key) || 0) - quantitySold));
                 }
             });
@@ -465,8 +471,9 @@ const SalesPage = () => {
              updatedItems[index]['category'] = '';
              updatedItems[index]['company'] = '';
              updatedItems[index]['totalItemAmount'] = 0;
-             updatedItems[index]['productMrp'] = '';
+             updatedItems[index]['productMrp'] = ''; // This will be the CURRENT Master MRP
              updatedItems[index]['productItemsPerPack'] = '';
+             updatedItems[index]['purchasedMrp'] = ''; // Clear purchased MRP on new product selection
 
 
              const availableBatches = [];
@@ -476,8 +483,9 @@ const SalesPage = () => {
                  const productNameLower = value.trim().toLowerCase();
                  purchaseBills.forEach(purchaseBill => {
                      purchaseBill.items.forEach(purchaseItem => {
+                         // Find purchase items matching the selected product name
                          if (purchaseItem.product.toLowerCase() === productNameLower && purchaseItem.batch && purchaseItem.expiry) {
-                             const batchIdentifier = `${purchaseItem.batch.trim().toLowerCase()}-${purchaseItem.expiry.trim().toLowerCase()}`;
+                             const batchIdentifier = `${purchaseItem.batch.trim().toLowerCase()}_${purchaseItem.expiry.trim().toLowerCase()}`;
 
                              if (!seenBatches.has(batchIdentifier)) {
                                   availableBatches.push({
@@ -489,6 +497,9 @@ const SalesPage = () => {
                                       unit: purchaseItem.unit || '',
                                       category: purchaseItem.category || '',
                                       company: purchaseItem.company || '',
+                                       // Store the MRP from this purchase record
+                                      purchasedMrp: Number(purchaseItem.mrp) || 0, // MRP from THIS purchase
+                                      originalMrpAtPurchase: Number(purchaseItem.originalMrp) || 0, // Original Master MRP at THIS purchase time
                                   });
                                   seenBatches.add(batchIdentifier);
                              }
@@ -505,23 +516,24 @@ const SalesPage = () => {
                       updatedItems[index]['unit'] = selectedProductMaster.unit || '';
                       updatedItems[index]['category'] = selectedProductMaster.category || '';
                       updatedItems[index]['company'] = selectedProductMaster.company || '';
-                      updatedItems[index]['discount'] = String(selectedProductMaster.discount || 0) || '';
+                      updatedItems[index]['discount'] = String(selectedProductMaster.discount || 0) || ''; // Default sales discount from master
 
-                       const mrp = Number(selectedProductMaster.mrp) || 0;
+                       const currentMasterMrp = Number(selectedProductMaster.mrp) || 0;
                        const itemsPerPack = Number(selectedProductMaster.itemsPerPack) || 1;
-                       updatedItems[index]['productMrp'] = String(mrp);
+                       updatedItems[index]['productMrp'] = String(currentMasterMrp); // Set CURRENT Master MRP here
                        updatedItems[index]['productItemsPerPack'] = String(itemsPerPack);
 
-                       const calculatedPricePerItem = (itemsPerPack > 0) ? (mrp / itemsPerPack) : mrp;
+                       // Initial price per item is based on the CURRENT Master MRP
+                       const calculatedPricePerItem = (itemsPerPack > 0) ? (currentMasterMrp / itemsPerPack) : currentMasterMrp;
                        updatedItems[index]['pricePerItem'] = calculatedPricePerItem.toFixed(2);
-                       console.log(`Item ${index}: Product "${value.trim()}" selected. Setting Price/Item to (MRP / ItemsPerPack) = (${mrp} / ${itemsPerPack}) = ${updatedItems[index]['pricePerItem']}`);
+                       console.log(`Item ${index}: Product "${value.trim()}" selected. Setting CURRENT Master MRP to ${currentMasterMrp} and Initial Price/Item to ${updatedItems[index]['pricePerItem']}`);
 
 
                   } else {
-                       updatedItems[index]['productMrp'] = '';
+                       updatedItems[index]['productMrp'] = ''; // Clear current Master MRP
                        updatedItems[index]['productItemsPerPack'] = '';
                        updatedItems[index]['pricePerItem'] = '';
-                       console.warn(`Item ${index}: Product "${value.trim()}" not found in Product Master. MRP, Items/Pack, and Price/Item cleared.`);
+                       console.warn(`Item ${index}: Product "${value.trim()}" not found in Product Master. CURRENT MRP, Items/Pack, and Price/Item cleared.`);
                   }
               }
 
@@ -536,11 +548,14 @@ const SalesPage = () => {
                  updatedItems[index]['batch'] = selectedBatchDetail.batch;
                  updatedItems[index]['expiry'] = selectedBatchDetail.expiry;
 
+                 // Auto-fill other details from the selected purchase batch
                  updatedItems[index]['unit'] = selectedBatchDetail.unit || updatedItems[index]['unit'] || '';
                  updatedItems[index]['category'] = selectedBatchDetail.category || updatedItems[index]['category'] || '';
                  updatedItems[index]['company'] = selectedBatchDetail.company || updatedItems[index]['company'] || '';
+                 updatedItems[index]['purchasedMrp'] = String(selectedBatchDetail.purchasedMrp ?? ''); // Set the MRP from THIS purchase batch
 
-                 console.log(`Item ${index}: Auto-filled Expiry: ${selectedBatchDetail.expiry}. Price/Item remains based on Product MRP.`);
+                 console.log(`Item ${index}: Auto-filled Expiry: ${selectedBatchDetail.expiry}. Set Purchased MRP: ${updatedItems[index]['purchasedMrp']}.`);
+                 // Price/Item remains based on the CURRENT Product Master MRP initially
 
                  updatedItems[index]['quantitySold'] = '';
                   updatedItems[index]['totalItemAmount'] = 0;
@@ -549,27 +564,28 @@ const SalesPage = () => {
                  console.log(`Item ${index}: Selected batch display "${value.trim()}" not found in available batches for exact match.`);
                  updatedItems[index]['batch'] = value;
                  updatedItems[index]['expiry'] = '';
-                 updatedItems[index]['unit'] = updatedItems[index]['unit'] || '';
-                 updatedItems[index]['category'] = updatedItems[index]['category'] || '';
-                 updatedItems[index]['company'] = updatedItems[index]['company'] || '';
+                 // Do NOT clear unit, category, company, productMrp, productItemsPerPack, pricePerItem, discount here
+                 // These should remain based on the Product Master entry selected earlier
+                 updatedItems[index]['purchasedMrp'] = ''; // Clear purchased MRP if batch doesn't match a known purchase
 
                  updatedItems[index]['totalItemAmount'] = 0;
                  updatedItems[index]['quantitySold'] = '';
 
                  if (value.trim() !== '') {
-                      toast.warning(`Entered batch "${value.trim()}" doesn't match known batches for this product. Expiry not auto-filled.`);
+                      toast.warning(`Entered batch "${value.trim()}" doesn't match known batches for this product. Expiry and Purchased MRP not auto-filled.`);
                  }
              }
          }
 
          if (field === 'expiry') {
-              console.log(`Item ${index}: Manual expiry change to "${value}".`);
+              console.log(`Item ${index}: Manual expiry change to "${value}". Note: This will not update batch details.`);
+              // We are disabling manual expiry edit in the UI, but keep this log in case it's re-enabled.
          }
 
 
          if (['quantitySold', 'pricePerItem', 'discount'].includes(field)) {
              const quantity = Number(updatedItems[index]['quantitySold']) || 0;
-             const price = Number(updatedItems[index]['pricePerItem']) || 0;
+             const price = Number(updatedItems[index]['pricePerItem']) || 0; // This is the selling price per item
              const discount = Number(updatedItems[index]['discount']) || 0;
 
              if (quantity >= 0 && price >= 0 && discount >= 0 && discount <= 100) {
@@ -589,7 +605,7 @@ const SalesPage = () => {
     // Add new sales item row
     const addItem = () => {
          console.log("Adding new item row.");
-        setSalesItems([...salesItems, { product: '', quantitySold: '', batch: '', expiry: '', pricePerItem: '', discount: '', unit: '', category: '', company: '', totalItemAmount: '', availableBatches: [], productMrp: '', productItemsPerPack: '' }]);
+        setSalesItems([...salesItems, { product: '', quantitySold: '', batch: '', expiry: '', pricePerItem: '', discount: '', unit: '', category: '', company: '', totalItemAmount: '', availableBatches: [], productMrp: '', productItemsPerPack: '', purchasedMrp: '' }]); // Added purchasedMrp
     };
 
     // Remove sales item row
@@ -717,13 +733,14 @@ const SalesPage = () => {
             // If editing, we need to consider the quantity from the original bill for this item
             let quantitySoldInOriginalBill = 0;
             if (editingBill) {
+                // Find the original item in the bill being edited that matches product, batch, and expiry
                 const originalItem = editingBill.items.find(
                     original => original.product?.trim().toLowerCase() === item.product?.trim().toLowerCase() &&
                               original.batch?.trim().toLowerCase() === item.batch?.trim().toLowerCase() &&
                               original.expiry?.trim().toLowerCase() === item.expiry?.trim().toLowerCase()
                 );
                 quantitySoldInOriginalBill = Number(originalItem?.quantitySold) || 0;
-                 console.log(`Log S.19.1: Editing mode detected. Original quantity sold for this item/batch: ${quantitySoldInOriginalBill}`);
+                 console.log(`Log S.19.1: Editing mode detected. Original quantity sold for this item/batch in this bill: ${quantitySoldInOriginalBill}`);
             }
 
              // Calculate the *net* available stock for this batch considering the original sale (if editing)
@@ -746,7 +763,7 @@ const SalesPage = () => {
 
 
     // Function to handle saving a new sales bill or updating an existing one
-    const handleSaveOrUpdateBill = () => {
+    const handleSaveOrUpdateBill = async () => { // Made async to handle MRP confirmation awaits
         console.log("Log S.23: handleSaveOrUpdateBill called.");
         console.log("Log S.24: Current editingBill state:", editingBill);
 
@@ -757,30 +774,114 @@ const SalesPage = () => {
 
         console.log("Log S.26: Validation successful. Proceeding to save/update.");
 
-        const salesItemsToSave = salesItems.map(item => ({
-            ...item,
-             quantitySold: Number(item.quantitySold) || 0,
-             pricePerItem: Number(item.pricePerItem) || 0,
-             discount: Number(item.discount) || 0,
-             totalItemAmount: Number(item.totalItemAmount) || 0,
-             productMrp: Number(item.productMrp) || 0,
-             productItemsPerPack: Number(item.productItemsPerPack) || 1,
-             product: item.product.trim(),
-             batch: item.batch.trim(),
-             expiry: item.expiry.trim(),
-             unit: item.unit.trim(),
-             category: item.category.trim(),
-             company: item.company.trim(),
-             availableBatches: undefined, // Do NOT save transient UI state
-        }));
+        const salesItemsToSave = [];
+        let billSaveError = false; // Flag to track if a critical error occurred during the save process
+
+        // --- Process Items with MRP Confirmation ---
+        for (const item of salesItems) {
+            const itemToSave = {
+                ...item,
+                quantitySold: Number(item.quantitySold) || 0,
+                pricePerItem: Number(item.pricePerItem) || 0, // This might be updated after confirmation
+                discount: Number(item.discount) || 0,
+                totalItemAmount: Number(item.totalItemAmount) || 0, // This might be updated after confirmation
+                productMrp: Number(item.productMrp) || 0, // This is the CURRENT Master MRP
+                productItemsPerPack: Number(item.productItemsPerPack) || 1,
+                purchasedMrp: Number(item.purchasedMrp) || 0, // This is the MRP from the Purchase record
+                product: item.product.trim(),
+                batch: item.batch.trim(),
+                expiry: item.expiry.trim(),
+                unit: item.unit.trim(),
+                category: item.category.trim(),
+                company: item.company.trim(),
+                availableBatches: undefined, // Do NOT save transient UI state
+            };
+
+            const currentMasterMrp = Number(item.productMrp) || 0; // Current MRP from Product Master
+            const purchasedMrp = Number(item.purchasedMrp) || 0; // MRP from the Purchase Record
+
+            console.log(`Processing item "${item.product}": Purchased MRP: ${purchasedMrp}, Current Master MRP: ${currentMasterMrp}`);
+
+            // Check for MRP difference only if both values are available and different
+            if (purchasedMrp > 0 && currentMasterMrp > 0 && purchasedMrp !== currentMasterMrp) {
+                console.log("MRP difference detected. Showing confirmation toast.");
+                const chosenMrp = await new Promise((resolve) => {
+                    toast.warning(
+                        `MRP difference for "${item.product}" (Batch: ${item.batch}, Exp: ${item.expiry}). ` +
+                        `Purchased at ₹${purchasedMrp}/pack, Current Master is ₹${currentMasterMrp}/pack. ` +
+                        `Which MRP should be used for this sale?`,
+                        {
+                            action: {
+                                label: `Use Purchased MRP (₹${purchasedMrp}/pack)`,
+                                onClick: () => resolve(purchasedMrp), // Resolve with purchased MRP
+                            },
+                            cancel: {
+                                label: `Use Current Master MRP (₹${currentMasterMrp}/pack)`,
+                                onClick: () => resolve(currentMasterMrp), // Resolve with current Master MRP
+                            },
+                            duration: 20000, // Give more time for confirmation
+                        }
+                    );
+                });
+
+                // Update pricePerItem and totalItemAmount based on the chosen MRP
+                const itemsPerPack = Number(item.productItemsPerPack) || 1;
+                const quantity = Number(item.quantitySold) || 0;
+
+                if (chosenMrp !== undefined) { // User made a choice
+                     itemToSave.productMrp = chosenMrp; // Store the chosen MRP with the sales item
+                     itemToSave.pricePerItem = (itemsPerPack > 0) ? (chosenMrp / itemsPerPack) : chosenMrp;
+                     itemToSave.totalItemAmount = quantity * itemToSave.pricePerItem * (1 - (Number(item.discount) || 0) / 100);
+                     console.log(`User chose MRP ₹${chosenMrp}/pack. Updated pricePerItem to ₹${itemToSave.pricePerItem.toFixed(2)} and totalItemAmount to ₹${itemToSave.totalItemAmount.toFixed(2)}`);
+                      toast.success(`Sale price for "${item.product}" set based on chosen MRP.`);
+                } else {
+                     // If for some reason the promise resolves without a choice (shouldn't happen with action/cancel)
+                     console.warn("MRP confirmation toast closed without a choice. Using current form values.");
+                     // Keep the values already in itemToSave (which came from the form)
+                }
+
+            } else if (purchasedMrp > 0 && currentMasterMrp === 0) {
+                 // Purchased MRP exists, but current Master MRP is 0 or missing - use purchased MRP
+                 console.log("Current Master MRP missing/zero. Using Purchased MRP.");
+                  itemToSave.productMrp = purchasedMrp;
+                  const itemsPerPack = Number(item.productItemsPerPack) || 1;
+                  const quantity = Number(item.quantitySold) || 0;
+                  itemToSave.pricePerItem = (itemsPerPack > 0) ? (purchasedMrp / itemsPerPack) : purchasedMrp;
+                  itemToSave.totalItemAmount = quantity * itemToSave.pricePerItem * (1 - (Number(item.discount) || 0) / 100);
+                  toast.info(`Using Purchased MRP (₹${purchasedMrp}/pack) for "${item.product}" as Master MRP is not available.`);
+
+            } else if (purchasedMrp === 0 && currentMasterMrp > 0) {
+                 // Purchased MRP is 0 or missing, but current Master MRP exists - use current Master MRP
+                 console.log("Purchased MRP missing/zero. Using Current Master MRP.");
+                 // itemToSave.productMrp is already the currentMasterMrp from form auto-fill
+                 const itemsPerPack = Number(item.productItemsPerPack) || 1;
+                 const quantity = Number(item.quantitySold) || 0;
+                 itemToSave.pricePerItem = (itemsPerPack > 0) ? (currentMasterMrp / itemsPerPack) : currentMasterMrp;
+                 itemToSave.totalItemAmount = quantity * itemToSave.pricePerItem * (1 - (Number(item.discount) || 0) / 100);
+                 toast.info(`Using Current Master MRP (₹${currentMasterMrp}/pack) for "${item.product}" as Purchased MRP is not available.`);
+
+            } else {
+                // No significant difference or both missing/zero - use the MRP already in the form (which was the current master MRP or manually entered)
+                 console.log("No significant MRP difference or both missing. Using form MRP.");
+                 const itemsPerPack = Number(item.productItemsPerPack) || 1;
+                 const quantity = Number(item.quantitySold) || 0;
+                 const formMrp = Number(item.productMrp) || 0; // Use the MRP currently in the form
+                 itemToSave.pricePerItem = (itemsPerPack > 0) ? (formMrp / itemsPerPack) : formMrp;
+                 itemToSave.totalItemAmount = quantity * itemToSave.pricePerItem * (1 - (Number(item.discount) || 0) / 100);
+            }
+
+            salesItemsToSave.push(itemToSave); // Add the processed item to the list to be saved
+        }
+        // --- End Item Processing with MRP Confirmation ---
+
 
         const currentBillData = {
              id: editingBill ? editingBill.id : Date.now() + Math.random(),
             billNumber: billNumber.trim(),
             customerName: customerName.trim(),
             date: date.trim(),
-            items: salesItemsToSave,
-            totalAmount: calculateGrandTotal(),
+            items: salesItemsToSave, // Use the potentially updated items list
+            totalAmount: salesItemsToSave.reduce((sum, item) => sum + (Number(item.totalItemAmount) || 0), 0), // Recalculate total based on final item totals
         };
 
         console.log("Log S.27: Prepared sales bill data:", currentBillData);
@@ -869,7 +970,7 @@ const SalesPage = () => {
         // --- Save or Update the Sales Bill ---
         let updatedSalesBills;
         let successMessage = '';
-        let billSaveError = false;
+
 
         if (editingBill) {
             console.log("Log S.40: Attempting to update existing sales bill...");
@@ -918,18 +1019,18 @@ const SalesPage = () => {
              setFilteredSalesBills(updatedSalesBills);
              console.log("Log S.46: Updated sales bills saved to localStorage and state.");
 
-             if (!billSaveError && stockUpdateSuccessful && stockUpdateErrors.length === 0) {
+             if (stockUpdateSuccessful && stockUpdateErrors.length === 0) {
                  toast.success(successMessage);
                  console.log("Log S.47: Success toast shown.");
-             } else if (!billSaveError && stockUpdateErrors.length > 0) {
+             } else if (stockUpdateErrors.length > 0) {
                   toast.warning(`${successMessage} However, there were issues updating stock.`);
                   console.log("Log S.47.1: Success toast with stock warning shown.");
-             } else if (!billSaveError) {
+             } else {
                    toast.info(`${successMessage} (No stock changes detected).`);
                    console.log("Log S.47.2: Success toast with no stock changes shown.");
              }
 
-             if (!billSaveError) {
+             if (!billSaveError) { // Check billSaveError flag
                  if (editingBill) {
                      console.log("Log S.48: Resetting editing state and closing dialog.");
                      setIsEditDialogOpen(false);
@@ -944,13 +1045,11 @@ const SalesPage = () => {
          } catch (lsErrorBills) {
              console.error("Log S.50: Error (Bill Save): Error saving sales bills to localStorage:", lsErrorBills);
              toast.error("Error saving sales bill data. Local storage might be full.");
-             billSaveError = true;
+             billSaveError = true; // Set flag on error
          }
 
          console.log("Log S.51: handleSaveOrUpdateBill finished.");
 
-         if (billSaveError) {
-         }
     };
 
     // Function to reset the form to initial state (for new entry)
@@ -959,7 +1058,7 @@ const SalesPage = () => {
         setBillNumber(''); // Clear bill number on reset
         setCustomerName('');
         setDate(formatDate(new Date()));
-        setSalesItems([{ product: '', quantitySold: '', batch: '', expiry: '', pricePerItem: '', discount: '', unit: '', category: '', company: '', totalItemAmount: '', availableBatches: [], productMrp: '', productItemsPerPack: '' }]);
+        setSalesItems([{ product: '', quantitySold: '', batch: '', expiry: '', pricePerItem: '', discount: '', unit: '', category: '', company: '', totalItemAmount: '', availableBatches: [], productMrp: '', productItemsPerPack: '', purchasedMrp: '' }]); // Added purchasedMrp
         setEditingBill(null);
         setIsEditDialogOpen(false);
         // Re-trigger auto-generation for the next bill number after reset
@@ -989,7 +1088,7 @@ const SalesPage = () => {
                   purchaseBills.forEach(purchaseBill => {
                       purchaseBill.items.forEach(purchaseItem => {
                           if (purchaseItem.product.toLowerCase() === itemProductNameLower && purchaseItem.batch && purchaseItem.expiry) {
-                               const batchIdentifier = `${purchaseItem.batch.trim().toLowerCase()}-${purchaseItem.expiry.trim().toLowerCase()}`;
+                               const batchIdentifier = `${purchaseItem.batch.trim().toLowerCase()}_${purchaseItem.expiry.trim().toLowerCase()}`;
                                if (!seenBatchesForEdit.has(batchIdentifier)) {
                                    availableBatchesForEdit.push({
                                        display: `Batch: ${purchaseItem.batch.trim()} - Exp: ${purchaseItem.expiry.trim()}`,
@@ -1000,6 +1099,8 @@ const SalesPage = () => {
                                         unit: purchaseItem.unit || '',
                                         category: purchaseItem.category || '',
                                         company: purchaseItem.company || '',
+                                        purchasedMrp: Number(purchaseItem.mrp) || 0, // MRP from THIS purchase
+                                        originalMrpAtPurchase: Number(purchaseItem.originalMrp) || 0, // Original Master MRP at THIS purchase time
                                    });
                                    seenBatchesForEdit.add(batchIdentifier);
                                }
@@ -1008,13 +1109,22 @@ const SalesPage = () => {
                   });
               }
 
+            // Find the current master product details to get the latest master MRP
+            const currentMasterProduct = products.find(p => p.name.toLowerCase() === itemProductNameLower);
+            const currentMasterMrp = Number(currentMasterProduct?.mrp) || 0;
+
+
             return {
                 ...item,
                  quantitySold: String(item.quantitySold ?? '') || '',
-                 pricePerItem: String(item.pricePerItem ?? '') || '',
+                 pricePerItem: String(item.pricePerItem ?? '') || '', // This is the price it was sold at
                  discount: String(item.discount ?? '') || '',
                  totalItemAmount: Number(item.totalItemAmount) || 0,
-                 productMrp: String(item.productMrp ?? '') || '',
+                 // Store the MRP used for THIS sale and the purchased MRP
+                 productMrp: String(item.productMrp ?? '') || '', // MRP used for THIS sale (could be purchased or master)
+                 purchasedMrp: String(item.purchasedMrp ?? '') || '', // MRP from the purchase record
+                 // We also need the *current* master MRP for comparison in the UI/logic
+                 currentMasterMrp: String(currentMasterMrp), // Add current master MRP for display/logic
                  productItemsPerPack: String(item.productItemsPerPack ?? '') || '',
                  product: item.product || '',
                  batch: item.batch || '',
@@ -1022,7 +1132,7 @@ const SalesPage = () => {
                  unit: item.unit || '',
                  category: item.category || '',
                  company: item.company || '',
-                 availableBatches: availableBatchesForEdit,
+                 availableBatches: availableBatchesForEdit, // Keep available batches for potential batch change during edit
             };
         }));
         setIsEditDialogOpen(true);
@@ -1131,7 +1241,20 @@ const SalesPage = () => {
     // Function to view sales bill details
     const handleViewBill = (bill) => {
          console.log("Viewing sales bill:", bill.billNumber);
-        setSelectedBillDetails(bill);
+        // When viewing, find the current master MRP for each item to display alongside purchased MRP
+        const itemsWithCurrentMrp = bill.items.map(item => {
+             const currentMasterProduct = products.find(p => p.name.toLowerCase() === item.product?.toLowerCase());
+             const currentMasterMrp = Number(currentMasterProduct?.mrp) || 0;
+             return {
+                 ...item,
+                 currentMasterMrp: currentMasterMrp, // Add current master MRP for display
+             };
+        });
+
+        setSelectedBillDetails({
+            ...bill,
+            items: itemsWithCurrentMrp, // Use items with current master MRP
+        });
         setIsViewDialogOpen(true);
         setIsEditDialogOpen(false);
     };
@@ -1246,7 +1369,8 @@ const SalesPage = () => {
                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch No. (Req.)</th>
                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry (MM-YY) (Req.)</th>
                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity (Items) (Req.)</th>
-                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
+                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purchased MRP/Pack</th> {/* Display Purchased MRP */}
+                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Master MRP/Pack</th> {/* Display Current Master MRP */}
                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items/Pack</th>
                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Item (Req. ≥0)</th>
                                         <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
@@ -1317,15 +1441,26 @@ const SalesPage = () => {
                                                     required
                                                 />
                                             </td>
+                                            {/* Display Purchased MRP */}
                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                 <input
                                                     type="text"
-                                                    placeholder="MRP"
-                                                    value={item.productMrp}
+                                                    placeholder="Purchased MRP"
+                                                    value={item.purchasedMrp ? `₹${Number(item.purchasedMrp).toFixed(2)}` : '-'}
                                                     className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
                                                      readOnly disabled
                                                 />
                                             </td>
+                                             {/* Display Current Master MRP */}
+                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                 <input
+                                                     type="text"
+                                                     placeholder="Current Master MRP"
+                                                     value={item.productMrp ? `₹${Number(item.productMrp).toFixed(2)}` : '-'} // productMrp holds the current master MRP initially
+                                                     className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                                                     readOnly disabled
+                                                 />
+                                             </td>
                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                  <input
                                                      type="text"
@@ -1338,9 +1473,9 @@ const SalesPage = () => {
 
                                             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                 <input
-                                                    type="text"
+                                                    type="text" // Keep as text to allow showing calculated value
                                                     placeholder="Price/Item"
-                                                    value={item.pricePerItem}
+                                                    value={item.pricePerItem} // This is the calculated selling price per item
                                                     className="w-full p-1 border border-gray-300 rounded text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
                                                      readOnly
                                                      disabled
@@ -1528,7 +1663,7 @@ const SalesPage = () => {
                                       ))
                                   ) : (
                                       <tr>
-                                          <td colSpan="5" className="px-3 py-2 whitespace-nowrap text-center text-sm text-gray-500">No sales bills found</td>
+                                          <td colSpan="13" className="px-3 py-2 whitespace-nowrap text-center text-sm text-gray-500">No sales bills found</td> {/* Updated colspan */}
                                       </tr>
                                   )}
                               </tbody>
@@ -1569,7 +1704,8 @@ const SalesPage = () => {
                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty (Items)</th>
                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purchased MRP/Pack</th> {/* Display Purchased MRP */}
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Master MRP/Pack</th> {/* Display Current Master MRP */}
                                                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items/Pack</th>
                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Item</th>
                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
@@ -1587,7 +1723,8 @@ const SalesPage = () => {
                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.quantitySold || '0'}</td> {/* Added fallback '0' */}
                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.batch || '-'}</td> {/* Added fallback '-' */}
                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.expiry || '-'}</td> {/* Added fallback '-' */}
-                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.productMrp ? `₹${Number(item.productMrp).toFixed(2)}` : '-'}</td>
+                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.purchasedMrp ? `₹${Number(item.purchasedMrp).toFixed(2)}` : '-'}</td> {/* Display Purchased MRP */}
+                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.currentMasterMrp ? `₹${Number(item.currentMasterMrp).toFixed(2)}` : '-'}</td> {/* Display Current Master MRP */}
                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.productItemsPerPack || '-'}</td>
                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">₹{Number(item.pricePerItem).toFixed(2) || '0.00'}</td> {/* Added fallback '0.00' */}
                                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.discount ?? '0'}%</td> {/* Use ?? '0' for discount */}
@@ -1600,7 +1737,7 @@ const SalesPage = () => {
                                             {/* Add a row if no items are present */}
                                              {selectedBillDetails.items && Array.isArray(selectedBillDetails.items) && selectedBillDetails.items.length === 0 && (
                                                  <tr>
-                                                     <td colSpan="12" className="px-3 py-4 text-center text-sm text-gray-500">No items found for this bill.</td>
+                                                     <td colSpan="13" className="px-3 py-4 text-center text-sm text-gray-500">No items found for this bill.</td> {/* Updated colspan */}
                                                  </tr>
                                              )}
                                       </tbody>
