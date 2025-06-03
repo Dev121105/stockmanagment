@@ -6,7 +6,7 @@ import { Button } from '../components/button';
 import { useRouter } from 'next/navigation';
 import Header from '../components/Header';
 import { toast } from 'sonner';
-import { Plus, Trash2, Eye, Edit, Save, Search, RefreshCcw, Printer, Share2, X } from 'lucide-react'; // Added X here
+import { Plus, Trash2, Eye, Edit, Save, Search, RefreshCcw, Printer, Share2, X, ArrowDownUp, ChevronLeft, ChevronRight } from 'lucide-react'; // Ensure all needed icons are imported
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -21,129 +21,132 @@ function formatDate(date) {
 }
 
 // Helper function to parse DD-MM-YYYY string to Date
+// Enhanced to handle both DD-MM-YYYY and MM-YY formats
 function parseDate(dateString) {
     if (!dateString || typeof dateString !== 'string' || dateString.trim() === '') {
         return null;
     }
-    const [day, month, year] = dateString.split('-');
-    if (day && month && year && !isNaN(parseInt(day, 10)) && !isNaN(parseInt(month, 10)) && !isNaN(parseInt(year, 10))) {
+
+    // Handle DD-MM-YYYY format
+    if (dateString.includes('-') && dateString.split('-').length === 3) {
+        const [day, month, year] = dateString.split('-');
         const dayInt = parseInt(day, 10);
         const monthInt = parseInt(month, 10);
         const yearInt = parseInt(year, 10);
-        // Month is 0-indexed in Date constructor
-        if (dayInt >= 1 && dayInt <= 31 && monthInt >= 1 && monthInt <= 12 && yearInt >= 1900 && yearInt <= 2100) {
+        if (
+            !isNaN(dayInt) && dayInt >= 1 && dayInt <= 31 &&
+            !isNaN(monthInt) && monthInt >= 1 && monthInt <= 12 &&
+            !isNaN(yearInt) && yearInt >= 1900 && yearInt <= 2100
+        ) {
             return new Date(yearInt, monthInt - 1, dayInt);
         }
     }
-    return null;
-}
 
-// Helper function to parse MM-YY string to Date (e.g., for expiry dates)
-function parseMonthYearDate(dateString) {
-    if (!dateString || typeof dateString !== 'string' || dateString.trim() === '') {
-        return null;
-    }
-    const parts = dateString.split('-');
-    if (parts.length !== 2) {
-        return null;
-    }
-    const [month, year] = parts;
-    const monthInt = parseInt(month, 10);
-    const yearInt = parseInt(year, 10);
+    // Handle MM-YY format (common for expiry dates)
+    if (dateString.includes('-') && dateString.split('-').length === 2) {
+        const [month, year] = dateString.split('-');
+        const monthInt = parseInt(month, 10);
+        const currentYear = new Date().getFullYear();
+        let yearInt = parseInt(year, 10);
 
-    if (month && year && !isNaN(monthInt) && !isNaN(yearInt)) {
-        // Assume 2-digit year is in 2000s
-        const fullYear = yearInt < 100 ? 2000 + yearInt : yearInt;
-        if (monthInt >= 1 && monthInt <= 12 && fullYear >= 1900 && fullYear <= 2100) {
-            return new Date(fullYear, monthInt - 1, 1);
+        // Adjust 2-digit year to 4-digit based on current century
+        if (yearInt < 100) {
+            yearInt = (yearInt > (currentYear % 100) + 20) ? 1900 + yearInt : 2000 + yearInt;
+        }
+
+        if (
+            !isNaN(monthInt) && monthInt >= 1 && monthInt <= 12 &&
+            !isNaN(yearInt) && yearInt >= 1900 && yearInt <= 2100
+        ) {
+            return new Date(yearInt, monthInt, 0); // Day 0 of next month is last day of current month
         }
     }
-    return null;
+
+    return null; // Default to null if parsing fails
 }
 
 
 const PurchasePage = () => {
-    const [purchaseBills, setPurchaseBills] = useState([]);
-    const [products, setProducts] = useState([]); // Master product list
-    const [vendors, setVendors] = useState([]); // List of unique vendor names
-
-    // State for the new/edit purchase bill form
-    const [newBill, setNewBill] = useState({
-        billNumber: '',
-        date: formatDate(new Date()),
-        vendorName: '',
-        items: [],
-        totalAmount: 0,
-    });
-    // State for a single item being added/edited within the bill
-    const [itemDetails, setItemDetails] = useState({
-        product: '',
-        batch: '',
-        expiry: '', // MM-YY format
-        quantity: '', // Number of items
-        packsPurchased: '', // Number of packs
-        itemsPerPack: 1,
-        ptr: '', // Price to Retailer
-        mrp: '', // Maximum Retail Price
-        originalMrp: '', // MRP from product master at the time of purchase
-        discount: '',
-        taxRate: '',
-        totalItemAmount: 0,
-        productId: null, // Link to the product master
-    });
-    const [selectedProductInModal, setSelectedProductInModal] = useState(null); // Product selected from the browse modal
-
-    // Modal visibility states
-    const [isNewBillModalOpen, setIsNewBillModalOpen] = useState(false);
-    const [isEditBillModalOpen, setIsEditBillModalOpen] = useState(false);
-    const [isViewBillModalOpen, setIsViewBillModalOpen] = useState(false);
-    const [isProductSelectionModalOpen, setIsProductSelectionModalOpen] = useState(false);
-
-    const [editingBillId, setEditingBillId] = useState(null); // ID of the bill being edited
-    const [viewingBill, setViewingBill] = useState(null); // Full bill object being viewed
-
-    const [searchTerm, setSearchTerm] = useState('');
-    const [filteredPurchaseBills, setFilteredPurchaseBills] = useState([]);
-    const billRef = useRef(); // Ref for the bill content for PDF generation
-
     const router = useRouter();
+    const [purchaseBills, setPurchaseBills] = useState([]);
+    const [products, setProducts] = useState([]); // Master products list
+    const [salesBills, setSalesBills] = useState([]); // For stock calculation
 
-    // --- Data Loading Effects ---
+    const [billNumber, setBillNumber] = useState('');
+    const [billDate, setBillDate] = useState(formatDate(new Date())); // Default to current date
+    const [supplierName, setSupplierName] = useState('');
+    const [currentPurchaseItems, setCurrentPurchaseItems] = useState([]);
+    const [totalAmount, setTotalAmount] = useState(0);
 
-    // Load products from localStorage
-    const loadProductsFromLocalStorage = useCallback(() => {
+    const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+    const [productSearchTerm, setProductSearchTerm] = useState('');
+    const [selectedProduct, setSelectedProduct] = useState(null);
+    const [newBatch, setNewBatch] = useState('');
+    const [newExpiry, setNewExpiry] = useState('');
+    const [newQuantity, setNewQuantity] = useState('');
+    const [newPTR, setNewPTR] = useState('');
+    const [newMRP, setNewMRP] = useState(''); // New MRP for the purchased item
+    const [newDiscount, setNewDiscount] = useState(''); // Discount on purchase line item
+
+    const [viewBillModalOpen, setViewBillModalOpen] = useState(false);
+    const [selectedBillForView, setSelectedBillForView] = useState(null);
+
+    const [isEditingBill, setIsEditingBill] = useState(false);
+    const [editBillId, setEditBillId] = useState(null);
+
+    const [purchaseBillsLoading, setPurchaseBillsLoading] = useState(true);
+    const [productsLoading, setProductsLoading] = useState(true);
+    const [salesBillsLoading, setSalesBillsLoading] = useState(true);
+
+    const productsRef = useRef(products); // Ref to current products state for stock calculation
+    const purchaseBillsRef = useRef(purchaseBills);
+    const salesBillsRef = useRef(salesBills);
+
+    useEffect(() => {
+        productsRef.current = products;
+    }, [products]);
+
+    useEffect(() => {
+        purchaseBillsRef.current = purchaseBills;
+    }, [purchaseBills]);
+
+    useEffect(() => {
+        salesBillsRef.current = salesBills;
+    }, [salesBills]);
+
+    // --- Data Loading Functions ---
+    const loadProductsData = useCallback(() => {
+        setProductsLoading(true);
         try {
             const storedProducts = localStorage.getItem('products');
-            const products = storedProducts ? JSON.parse(storedProducts) : [];
-            const processedProducts = products.map(p => ({
+            const parsedProducts = storedProducts ? JSON.parse(storedProducts) : [];
+            const processedProducts = parsedProducts.map(p => ({
                 ...p,
-                quantity: Number(p.quantity) || 0,
                 mrp: Number(p.mrp) || 0,
-                originalMrp: Number(p.originalMrp) || 0,
+                originalMrp: Number(p.originalMrp) || 0, // Ensure originalMrp is number
                 itemsPerPack: Number(p.itemsPerPack) || 1,
                 minStock: Number(p.minStock) || 0,
                 maxStock: Number(p.maxStock) || 0,
                 discount: Number(p.discount) || 0,
             }));
             setProducts(processedProducts);
-            return processedProducts; // Return data for immediate use if needed
         } catch (error) {
             console.error("Error loading products:", error);
-            toast.error("Failed to load product master data.");
+            toast.error("Failed to load product data.");
             setProducts([]);
-            return [];
+        } finally {
+            setProductsLoading(false);
         }
     }, []);
 
-    // Load purchase bills from localStorage
-    const loadPurchaseBillsFromLocalStorage = useCallback(() => {
+    const loadPurchaseBillsData = useCallback(() => {
+        setPurchaseBillsLoading(true);
         try {
             const storedBills = localStorage.getItem('purchaseBills');
             const bills = storedBills ? JSON.parse(storedBills) : [];
             const processedBills = bills.map(bill => ({
                 ...bill,
-                date: bill.date ? formatDate(parseDate(bill.date)) : '', // Ensure date is formatted consistently
-                totalAmount: Number(bill.totalAmount) || 0,
+                date: bill.date || '',
                 items: bill.items.map(item => ({
                     ...item,
                     quantity: Number(item.quantity) || 0,
@@ -151,703 +154,651 @@ const PurchasePage = () => {
                     itemsPerPack: Number(item.itemsPerPack) || 1,
                     ptr: Number(item.ptr) || 0,
                     mrp: Number(item.mrp) || 0,
-                    originalMrp: Number(item.originalMrp) || 0,
+                    originalMrp: Number(item.originalMrp) || 0, // Ensure originalMrp is number
                     discount: Number(item.discount) || 0,
                     taxRate: Number(item.taxRate) || 0,
                     totalItemAmount: Number(item.totalItemAmount) || 0,
                 })),
+                totalAmount: Number(bill.totalAmount) || 0,
             }));
-            processedBills.sort((a, b) => {
-                const dateA = parseDate(a.date);
-                const dateB = parseDate(b.date);
-                if (!dateA && !dateB) return 0;
-                if (!dateA) return 1;
-                if (!dateB) return -1;
-                return dateB - dateA; // Sort by newest date first
-            });
             setPurchaseBills(processedBills);
-            setFilteredPurchaseBills(processedBills); // Initialize filtered bills
-            return processedBills;
         } catch (error) {
             console.error("Error loading purchase bills:", error);
             toast.error("Failed to load purchase bills.");
             setPurchaseBills([]);
-            setFilteredPurchaseBills([]);
-            return [];
+        } finally {
+            setPurchaseBillsLoading(false);
         }
     }, []);
 
-    // Load vendors from localStorage
-    const loadVendorsFromLocalStorage = useCallback(() => {
+    const loadSalesBillsData = useCallback(() => {
+        setSalesBillsLoading(true);
         try {
-            const storedVendors = localStorage.getItem('vendors');
-            const parsedVendors = storedVendors ? JSON.parse(storedVendors) : [];
-            setVendors(parsedVendors);
-            return parsedVendors;
+            const storedBills = localStorage.getItem('salesBills');
+            const bills = storedBills ? JSON.parse(storedBills) : [];
+            const processedBills = bills.map(bill => ({
+                ...bill,
+                items: bill.items.map(item => ({
+                    ...item,
+                    quantitySold: Number(item.quantitySold) || 0,
+                    pricePerItem: Number(item.pricePerItem) || 0,
+                    discount: Number(item.discount) || 0,
+                    totalItemAmount: Number(item.totalItemAmount) || 0,
+                    productMrp: Number(item.productMrp) || 0,
+                    productItemsPerPack: Number(item.productItemsPerPack) || 1,
+                    purchasedMrp: Number(item.purchasedMrp) || 0,
+                }))
+            }));
+            setSalesBills(processedBills);
         } catch (error) {
-            console.error("Error loading vendors:", error);
-            toast.error("Failed to load vendor data.");
-            setVendors([]);
+            console.error("Error loading sales bills:", error);
+            toast.error("Failed to load sales bills.");
+            setSalesBills([]);
+        } finally {
+            setSalesBillsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadProductsData();
+        loadPurchaseBillsData();
+        loadSalesBillsData();
+
+        const handleStorageChange = (e) => {
+            if (e.key === 'products' || e.key === 'purchaseBills' || e.key === 'salesBills') {
+                console.log("Storage change detected, reloading data...");
+                loadProductsData();
+                loadPurchaseBillsData();
+                loadSalesBillsData();
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+
+        // Listen for custom events dispatched by other pages
+        const handleDataUpdated = () => {
+            console.log("Custom data update event received, reloading data...");
+            loadProductsData();
+            loadPurchaseBillsData();
+            loadSalesBillsData();
+        };
+        window.addEventListener("productsUpdated", handleDataUpdated);
+        window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
+        window.addEventListener("salesBillsUpdated", handleDataUpdated);
+
+
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+            window.removeEventListener("productsUpdated", handleDataUpdated);
+            window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
+            window.removeEventListener("salesBillsUpdated", handleDataUpdated);
+        };
+    }, [loadProductsData, loadPurchaseBillsData, loadSalesBillsData]);
+
+    // Function to calculate stock by batch for a product (using refs for latest data)
+    const getStockByBatch = useCallback((productName) => {
+        const batchMap = new Map();
+
+        purchaseBillsRef.current.forEach(bill => {
+            bill.items.forEach(item => {
+                if (item.product.toLowerCase() === productName.toLowerCase()) {
+                    const key = `${item.batch.trim()}_${item.expiry.trim()}`;
+                    batchMap.set(key, (batchMap.get(key) || 0) + Number(item.quantity));
+                }
+            });
+        });
+
+        salesBillsRef.current.forEach(bill => {
+            bill.items.forEach(item => {
+                if (item.product.toLowerCase() === productName.toLowerCase()) {
+                    const key = `${item.batch.trim()}_${item.expiry.trim()}`;
+                    batchMap.set(key, Math.max(0, (batchMap.get(key) || 0) - Number(item.quantitySold)));
+                }
+            });
+        });
+
+        return Array.from(batchMap.entries()).map(([key, quantity]) => {
+            const [batch, expiry] = key.split('_');
+            return { batch, expiry, quantity };
+        }).filter(batch => batch.quantity > 0).sort((a, b) => {
+            const dateA = parseDate(a.expiry);
+            const dateB = parseDate(b.expiry);
+            if (!dateA && !dateB) return 0;
+            if (!dateA) return 1;
+            if (!dateB) return -1;
+            return dateA - dateB;
+        });
+    }, []); // No direct state dependencies, uses refs
+
+    // Helper function to calculate total stock for a product, for display
+    const calculateTotalStockForProduct = useCallback((productName) => {
+        const batchStocks = getStockByBatch(productName);
+        return batchStocks.reduce((sum, batch) => sum + batch.quantity, 0);
+    }, [getStockByBatch]); // Dependency on getStockByBatch
+
+
+    // --- Product Search & Selection Logic ---
+    const filterProducts = useMemo(() => {
+        if (!productSearchTerm) {
             return [];
         }
-    }, []);
-
-    // Master data loading effect
-    useEffect(() => {
-        loadProductsFromLocalStorage();
-        loadPurchaseBillsFromLocalStorage();
-        loadVendorsFromLocalStorage();
-
-        const handleDataUpdated = () => {
-            loadProductsFromLocalStorage();
-            loadPurchaseBillsFromLocalStorage();
-        };
-
-        window.addEventListener('productsUpdated', handleDataUpdated);
-        window.addEventListener('purchaseBillsUpdated', handleDataUpdated);
-        return () => {
-            window.removeEventListener('productsUpdated', handleDataUpdated);
-            window.removeEventListener('purchaseBillsUpdated', handleDataUpdated);
-        };
-    }, [loadProductsFromLocalStorage, loadPurchaseBillsFromLocalStorage, loadVendorsFromLocalStorage]);
-
-    // --- Search and Filter ---
-    useEffect(() => {
-        const lowerCaseSearchTerm = searchTerm.toLowerCase();
-        const filtered = purchaseBills.filter(bill =>
-            bill.billNumber.toLowerCase().includes(lowerCaseSearchTerm) ||
-            bill.vendorName.toLowerCase().includes(lowerCaseSearchTerm) ||
-            bill.date.toLowerCase().includes(lowerCaseSearchTerm) ||
-            bill.items.some(item => item.product.toLowerCase().includes(lowerCaseSearchTerm))
-        );
-        setFilteredPurchaseBills(filtered);
-    }, [searchTerm, purchaseBills]);
-
-
-    // --- Form Handlers ---
-    const handleNewBillChange = (e) => {
-        const { name, value } = e.target;
-        setNewBill(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleItemDetailsChange = (e) => {
-        const { name, value } = e.target;
-        setItemDetails(prev => ({ ...prev, [name]: value }));
-    };
-
-    const calculateItemTotal = useCallback((qty, price, discount, taxRate) => {
-        const quantityNum = Number(qty) || 0;
-        const priceNum = Number(price) || 0;
-        const discountNum = Number(discount) || 0;
-        const taxRateNum = Number(taxRate) || 0;
-
-        let total = quantityNum * priceNum;
-        if (discountNum > 0) {
-            total -= (total * (discountNum / 100));
-        }
-        if (taxRateNum > 0) {
-            total += (total * (taxRateNum / 100));
-        }
-        return total;
-    }, []);
-
-    useEffect(() => {
-        // Recalculate totalItemAmount whenever relevant itemDetails change
-        const { quantity, ptr, discount, taxRate } = itemDetails;
-        setItemDetails(prev => ({
-            ...prev,
-            totalItemAmount: calculateItemTotal(quantity, ptr, discount, taxRate),
+        const lowerCaseSearchTerm = productSearchTerm.toLowerCase();
+        return products.filter(product =>
+            product.name.toLowerCase().includes(lowerCaseSearchTerm) ||
+            product.category.toLowerCase().includes(lowerCaseSearchTerm) ||
+            product.company.toLowerCase().includes(lowerCaseSearchTerm) ||
+            (product.batch && product.batch.toLowerCase().includes(lowerCaseSearchTerm))
+        ).map(product => ({
+            ...product,
+            // Add calculated current stock for display in the product Browse list
+            calculatedCurrentStock: calculateTotalStockForProduct(product.name)
         }));
-    }, [itemDetails.quantity, itemDetails.ptr, itemDetails.discount, itemDetails.taxRate, calculateItemTotal]);
+    }, [productSearchTerm, products, calculateTotalStockForProduct]); // Dependency on calculatedCurrentStock
 
-
-    const handleProductSelection = (productId) => {
-        const product = products.find(p => p.id === productId);
-        setSelectedProductInModal(product);
-        if (product) {
-            setItemDetails(prev => ({
-                ...prev,
-                productId: product.id,
-                product: product.name,
-                packsPurchased: '', // Reset packs for new product
-                quantity: '', // Reset quantity for new product
-                itemsPerPack: Number(product.itemsPerPack) || 1, // Default from product master
-                ptr: product.ptr || '', // Default from product master
-                mrp: product.mrp || '', // Default from product master
-                originalMrp: product.originalMrp || product.mrp || '', // Store original MRP for reference
-                discount: product.discount || '',
-                taxRate: product.taxRate || '',
-            }));
-            setIsProductSelectionModalOpen(false); // Close modal after selection
-        }
+    const handleProductSelect = (product) => {
+        setSelectedProduct(product);
+        setNewBatch('');
+        setNewExpiry('');
+        setNewQuantity('');
+        setNewPTR(product.ptr || ''); // Pre-fill with master PTR if available
+        setNewMRP(product.mrp || ''); // Pre-fill with master MRP if available
+        setNewDiscount(product.discount || ''); // Pre-fill with master discount if available
     };
 
-    const handleAddItem = () => {
-        if (!selectedProductInModal) {
+    const handleAddProductToBill = () => {
+        if (!selectedProduct) {
             toast.error("Please select a product.");
             return;
         }
-        if (!itemDetails.batch) {
+        if (!newQuantity || newQuantity <= 0) {
+            toast.error("Quantity must be a positive number.");
+            return;
+        }
+        if (!newBatch) {
             toast.error("Batch number is required.");
             return;
         }
-        if (!itemDetails.expiry) {
-            toast.error("Expiry date (MM-YY) is required.");
+        if (!newExpiry) {
+            toast.error("Expiry date is required.");
             return;
         }
-        if (!itemDetails.quantity || Number(itemDetails.quantity) <= 0) {
-            toast.error("Quantity must be greater than 0.");
+        if (!newPTR || newPTR < 0) {
+            toast.error("PTR (Price To Retailer) is required and must be non-negative.");
             return;
         }
-        if (!itemDetails.ptr || Number(itemDetails.ptr) <= 0) {
-            toast.error("PTR (Price to Retailer) must be greater than 0.");
+        if (!newMRP || newMRP < 0) {
+            toast.error("MRP is required and must be non-negative.");
             return;
         }
-        if (!itemDetails.mrp || Number(itemDetails.mrp) <= 0) {
-            toast.error("MRP (Maximum Retail Price) must be greater than 0.");
+        if (newDiscount === '' || newDiscount < 0 || newDiscount > 100) {
+            toast.error("Discount must be between 0 and 100.");
             return;
         }
 
-        const quantity = Number(itemDetails.quantity);
-        const packsPurchased = Math.ceil(quantity / itemDetails.itemsPerPack); // Calculate packs based on items and itemsPerPack
+        const quantity = Number(newQuantity);
+        const ptr = Number(newPTR);
+        const mrp = Number(newMRP);
+        const discount = Number(newDiscount);
 
-        const newItem = {
-            id: selectedProductInModal.id, // Keep product ID for linking to master
-            product: itemDetails.product,
-            batch: itemDetails.batch,
-            expiry: itemDetails.expiry,
+        const currentItem = {
+            id: selectedProduct.id, // Keep product ID for potential future lookup
+            product: selectedProduct.name,
+            batch: newBatch.trim(),
+            expiry: newExpiry.trim(),
             quantity: quantity,
-            packsPurchased: packsPurchased,
-            itemsPerPack: Number(itemDetails.itemsPerPack),
-            ptr: Number(itemDetails.ptr),
-            mrp: Number(itemDetails.mrp),
-            originalMrp: Number(itemDetails.originalMrp),
-            discount: Number(itemDetails.discount) || 0,
-            taxRate: Number(itemDetails.taxRate) || 0,
-            totalItemAmount: calculateItemTotal(quantity, itemDetails.ptr, itemDetails.discount, itemDetails.taxRate),
-            unit: selectedProductInModal.unit, // Carry over unit from product master
-            category: selectedProductInModal.category,
-            company: selectedProductInModal.company,
+            packsPurchased: quantity / (selectedProduct.itemsPerPack || 1), // Calculate packs
+            itemsPerPack: selectedProduct.itemsPerPack || 1, // Store items per pack
+            ptr: ptr,
+            mrp: mrp, // Purchased MRP for this bill item
+            originalMrp: selectedProduct.originalMrp || selectedProduct.mrp, // Store original master MRP
+            unit: selectedProduct.unit,
+            category: selectedProduct.category,
+            company: selectedProduct.company,
+            discount: discount, // Discount for this purchased item
+            taxRate: selectedProduct.taxRate || 0, // Assuming taxRate from master if not specified in purchase
+            totalItemAmount: (quantity * ptr * (1 - discount / 100)), // Calculate total for this item
         };
 
-        setNewBill(prev => {
-            const updatedItems = [...prev.items, newItem];
-            const newTotalAmount = updatedItems.reduce((sum, item) => sum + item.totalItemAmount, 0);
-            return {
-                ...prev,
-                items: updatedItems,
-                totalAmount: newTotalAmount,
-            };
-        });
+        setCurrentPurchaseItems((prevItems) => [...prevItems, currentItem]);
+        toast.success(`${selectedProduct.name} (Batch: ${newBatch}) added to bill.`);
 
-        // Reset item details and selected product
-        setSelectedProductInModal(null);
-        setItemDetails({
-            product: '', batch: '', expiry: '', quantity: '', packsPurchased: '', itemsPerPack: 1,
-            ptr: '', mrp: '', originalMrp: '', discount: '', taxRate: '', totalItemAmount: 0, productId: null,
-        });
-        toast.success(`${newItem.product} added to bill.`);
+        // Reset fields
+        setSelectedProduct(null);
+        setProductSearchTerm('');
+        setNewBatch('');
+        setNewExpiry('');
+        setNewQuantity('');
+        setNewPTR('');
+        setNewMRP('');
+        setNewDiscount('');
+        setIsAddProductModalOpen(false);
     };
 
     const handleRemoveItem = (index) => {
-        setNewBill(prev => {
-            const updatedItems = prev.items.filter((_, i) => i !== index);
-            const newTotalAmount = updatedItems.reduce((sum, item) => sum + item.totalItemAmount, 0);
-            toast.info(`Removed item: ${prev.items[index].product}`);
-            return {
-                ...prev,
-                items: updatedItems,
-                totalAmount: newTotalAmount,
-            };
-        });
+        setCurrentPurchaseItems((prevItems) => prevItems.filter((_, i) => i !== index));
+        toast.info("Item removed from bill.");
     };
 
-    const resetForm = () => {
-        setNewBill({
-            billNumber: '',
-            date: formatDate(new Date()),
-            vendorName: '',
-            items: [],
-            totalAmount: 0,
+    // --- Enable Editing of Current Purchase Items ---
+    const handleItemChange = useCallback((index, field, value) => {
+        setCurrentPurchaseItems(prevItems => {
+            const updatedItems = [...prevItems];
+            const itemToUpdate = { ...updatedItems[index] };
+
+            let parsedValue = value;
+            if (['quantity', 'ptr', 'mrp', 'discount', 'packsPurchased', 'itemsPerPack', 'taxRate'].includes(field)) {
+                parsedValue = Number(value);
+                if (isNaN(parsedValue)) {
+                    // Optionally set to 0 or previous valid value if input is not a number
+                    parsedValue = 0;
+                    if (field === 'discount' && value === '') parsedValue = 0; // Allow empty string for discount to clear it
+                }
+            }
+
+            itemToUpdate[field] = parsedValue;
+
+            // Recalculate derived fields based on changes
+            if (field === 'quantity' || field === 'ptr' || field === 'discount') {
+                const quantity = Number(itemToUpdate.quantity) || 0;
+                const ptr = Number(itemToUpdate.ptr) || 0;
+                const discount = Number(itemToUpdate.discount) || 0;
+                itemToUpdate.totalItemAmount = (quantity * ptr * (1 - discount / 100));
+            }
+
+            // If quantity changes, recalculate packsPurchased
+            if (field === 'quantity') {
+                itemToUpdate.packsPurchased = quantity / (itemToUpdate.itemsPerPack || 1);
+            }
+
+            updatedItems[index] = itemToUpdate;
+            return updatedItems;
         });
-        setEditingBillId(null);
-        setSelectedProductInModal(null);
-        setItemDetails({
-            product: '', batch: '', expiry: '', quantity: '', packsPurchased: '', itemsPerPack: 1,
-            ptr: '', mrp: '', originalMrp: '', discount: '', taxRate: '', totalItemAmount: 0, productId: null,
-        });
-    };
+    }, []);
 
-    const handleOpenNewBillModal = () => {
-        resetForm();
-        setIsNewBillModalOpen(true);
-        setIsEditBillModalOpen(false);
-        setIsViewBillModalOpen(false);
-    };
 
-    const handleSaveBill = (e) => {
-        e.preventDefault();
-        if (!newBill.billNumber.trim()) {
-            toast.error("Bill number is required.");
-            return;
-        }
-        if (!newBill.vendorName.trim()) {
-            toast.error("Vendor name is required.");
-            return;
-        }
-        if (newBill.items.length === 0) {
-            toast.error("Please add at least one item to the bill.");
+    // --- Total Amount Calculation ---
+    useEffect(() => {
+        const calculatedTotal = currentPurchaseItems.reduce((sum, item) => sum + (item.totalItemAmount || 0), 0);
+        setTotalAmount(calculatedTotal);
+    }, [currentPurchaseItems]);
+
+    // --- Save/Update Bill Logic ---
+    const handleSaveBill = () => {
+        if (!billNumber || !billDate || !supplierName || currentPurchaseItems.length === 0) {
+            toast.error("Please fill all bill details and add at least one item.");
             return;
         }
 
-        const billToSave = {
-            ...newBill,
-            id: editingBillId || `purchase-${Date.now()}`,
-            date: formatDate(parseDate(newBill.date) || new Date()), // Ensure date is consistently formatted
+        const newBill = {
+            id: isEditingBill ? editBillId : `PB-${Date.now()}`,
+            billNumber: billNumber.trim(),
+            date: billDate,
+            supplierName: supplierName.trim(),
+            items: currentPurchaseItems.map(item => ({
+                ...item,
+                // Ensure numbers are stored as numbers if they weren't already
+                quantity: Number(item.quantity),
+                packsPurchased: Number(item.packsPurchased),
+                ptr: Number(item.ptr),
+                mrp: Number(item.mrp),
+                originalMrp: Number(item.originalMrp),
+                discount: Number(item.discount),
+                taxRate: Number(item.taxRate),
+                totalItemAmount: Number(item.totalItemAmount),
+            })),
+            totalAmount: totalAmount,
         };
 
-        let updatedPurchaseBills;
-        let updatedProducts = [...products];
-
-        if (editingBillId) {
-            // Revert stock for original bill items before applying new changes
-            const originalBill = purchaseBills.find(bill => bill.id === editingBillId);
-            if (originalBill) {
-                originalBill.items.forEach(oldItem => {
-                    const productToUpdate = updatedProducts.find(p => p.id === oldItem.id);
-                    if (productToUpdate) {
-                        productToUpdate.quantity = (productToUpdate.quantity || 0) - (oldItem.quantity || 0);
-                    }
-                });
-            }
-
-            // Update bill and apply new stock changes
-            updatedPurchaseBills = purchaseBills.map(bill =>
-                bill.id === editingBillId ? billToSave : bill
+        let updatedBills;
+        if (isEditingBill) {
+            updatedBills = purchaseBills.map(bill =>
+                bill.id === editBillId ? newBill : bill
             );
-            toast.success("Purchase bill updated successfully!");
+            toast.success(`Purchase Bill ${billNumber} updated successfully!`);
         } else {
-            // Add new bill
-            updatedPurchaseBills = [...purchaseBills, billToSave];
-            toast.success("Purchase bill saved successfully!");
+            updatedBills = [...purchaseBills, newBill];
+            toast.success(`Purchase Bill ${billNumber} saved successfully!`);
         }
 
-        // Apply new stock changes (for both new and edited bills)
-        billToSave.items.forEach(newItem => {
-            const productToUpdate = updatedProducts.find(p => p.id === newItem.id);
-            if (productToUpdate) {
-                productToUpdate.quantity = (productToUpdate.quantity || 0) + (newItem.quantity || 0);
-                productToUpdate.mrp = newItem.mrp; // Update product master MRP with latest purchase MRP
-                productToUpdate.ptr = newItem.ptr; // Update product master PTR with latest purchase PTR
-            } else {
-                // If the product was not found in the master, add it (or warn/handle as per business logic)
-                console.warn(`Product with ID ${newItem.id} not found in master list. Adding as new product.`);
-                updatedProducts.push({
-                    id: newItem.id,
-                    name: newItem.product,
-                    unit: newItem.unit || 'unit',
-                    category: newItem.category || 'N/A',
-                    company: newItem.company || 'N/A',
-                    quantity: newItem.quantity || 0,
-                    mrp: newItem.mrp || 0,
-                    originalMrp: newItem.originalMrp || newItem.mrp || 0,
-                    ptr: newItem.ptr || 0,
-                    itemsPerPack: newItem.itemsPerPack || 1,
-                    minStock: 0, // Default for new product
-                    maxStock: 0, // Default for new product
-                    discount: newItem.discount || 0,
-                    taxRate: newItem.taxRate || 0,
-                });
-            }
-        });
+        localStorage.setItem('purchaseBills', JSON.stringify(updatedBills));
+        setPurchaseBills(updatedBills); // Update state immediately
+        dispatchDataUpdatedEvent('purchaseBillsUpdated'); // Notify other components
 
-        localStorage.setItem('purchaseBills', JSON.stringify(updatedPurchaseBills));
-        localStorage.setItem('products', JSON.stringify(updatedProducts));
-        setPurchaseBills(updatedPurchaseBills);
-        setProducts(updatedProducts); // Update products state
-
-        // Update vendor list if new vendor name is entered
-        if (billToSave.vendorName && !vendors.includes(billToSave.vendorName)) {
-            const updatedVendors = [...vendors, billToSave.vendorName];
-            localStorage.setItem('vendors', JSON.stringify(updatedVendors));
-            setVendors(updatedVendors);
-        }
-
-        // Trigger custom events to notify other components (e.g., Dashboard, SalesPage)
-        window.dispatchEvent(new Event('purchaseBillsUpdated'));
-        window.dispatchEvent(new Event('productsUpdated'));
+        // Update product master list quantities (not stock calculation, but the master record)
+        updateProductQuantities(currentPurchaseItems);
 
         resetForm();
-        setIsNewBillModalOpen(false);
-        setIsEditBillModalOpen(false);
+    };
+
+    const updateProductQuantities = (items) => {
+        setProducts(prevProducts => {
+            const productsMap = new Map(prevProducts.map(p => [p.id, p]));
+            const updatedProductIds = new Set();
+
+            items.forEach(item => {
+                const productInMaster = productsMap.get(item.id);
+                if (productInMaster) {
+                    // Update master product's MRP, PTR, Discount if purchased with different values
+                    // This is a decision point: do new purchases update master prices?
+                    // For now, let's assume they update the master MRP and PTR to the latest purchased values
+                    productInMaster.mrp = Number(item.mrp);
+                    productInMaster.ptr = Number(item.ptr);
+                    productInMaster.discount = Number(item.discount);
+                    // Also update expiry and batch in master if needed, though typically master is generic
+                    // For simplicity, we are keeping batch/expiry in bill items, not master.
+                    // productInMaster.batch = item.batch;
+                    // productInMaster.expiry = item.expiry;
+                    productsMap.set(item.id, productInMaster);
+                    updatedProductIds.add(item.id);
+                }
+            });
+
+            const finalProducts = Array.from(productsMap.values());
+            localStorage.setItem('products', JSON.stringify(finalProducts));
+            dispatchDataUpdatedEvent('productsUpdated'); // Notify product master page
+            return finalProducts;
+        });
+    };
+
+
+    const resetForm = () => {
+        setBillNumber('');
+        setBillDate(formatDate(new Date()));
+        setSupplierName('');
+        setCurrentPurchaseItems([]);
+        setTotalAmount(0);
+        setIsEditingBill(false);
+        setEditBillId(null);
     };
 
     const handleEditBill = (billId) => {
         const billToEdit = purchaseBills.find(bill => bill.id === billId);
         if (billToEdit) {
-            setEditingBillId(billId);
-            setNewBill({
-                billNumber: billToEdit.billNumber,
-                date: billToEdit.date,
-                vendorName: billToEdit.vendorName,
-                items: billToEdit.items.map(item => ({ // Ensure items are deep copied
-                    ...item,
-                    productId: item.id, // Ensure productId is set for pre-selection if needed
-                })),
-                totalAmount: billToEdit.totalAmount,
-            });
-            setIsEditBillModalOpen(true);
-            setIsNewBillModalOpen(false);
-            setIsViewBillModalOpen(false);
+            setBillNumber(billToEdit.billNumber);
+            setBillDate(billToEdit.date);
+            setSupplierName(billToEdit.supplierName);
+            setCurrentPurchaseItems(billToEdit.items);
+            setTotalAmount(billToEdit.totalAmount);
+            setIsEditingBill(true);
+            setEditBillId(billToEdit.id);
+            toast.info(`Editing Bill No: ${billToEdit.billNumber}`);
+            setViewBillModalOpen(false); // Close view modal if open
+        } else {
+            toast.error("Bill not found for editing.");
         }
     };
 
     const handleDeleteBill = (billId) => {
-        if (window.confirm("Are you sure you want to delete this purchase bill? This action cannot be undone and will revert stock changes.")) {
-            const billToDelete = purchaseBills.find(bill => bill.id === billId);
+        if (window.confirm("Are you sure you want to delete this purchase bill? This action cannot be undone and will affect stock levels.")) {
+            const updatedBills = purchaseBills.filter(bill => bill.id !== billId);
+            localStorage.setItem('purchaseBills', JSON.stringify(updatedBills));
+            setPurchaseBills(updatedBills);
+            dispatchDataUpdatedEvent('purchaseBillsUpdated'); // Notify other components
+            toast.success("Purchase bill deleted successfully!");
+            setViewBillModalOpen(false); // Close view modal if open
 
-            // Revert stock changes for deleted bill
-            const updatedProducts = products.map(p => {
-                const itemInDeletedBill = billToDelete.items.find(item => item.id === p.id);
-                if (itemInDeletedBill) {
-                    return { ...p, quantity: p.quantity - itemInDeletedBill.quantity };
-                }
-                return p;
-            });
-
-            const updatedPurchaseBills = purchaseBills.filter(bill => bill.id !== billId);
-            localStorage.setItem('purchaseBills', JSON.stringify(updatedPurchaseBills));
-            localStorage.setItem('products', JSON.stringify(updatedProducts));
-            setPurchaseBills(updatedPurchaseBills);
-            setProducts(updatedProducts); // Update products state
-
-            // Trigger custom events to notify other components
-            window.dispatchEvent(new Event('purchaseBillsUpdated'));
-            window.dispatchEvent(new Event('productsUpdated'));
-
-            toast.success("Purchase bill deleted successfully and stock reverted!");
+            // Revert product quantities (simple decrement, actual stock is recalculated by functions)
+            const deletedBill = purchaseBills.find(bill => bill.id === billId);
+            if (deletedBill) {
+                // This is tricky: simply decrementing master quantity is bad.
+                // The current stock calculation already handles this by re-evaluating all bills.
+                // So, no need to manually "revert" quantities in master products.
+                // The dashboard and product selection will always show derived values.
+            }
         }
     };
 
-    // --- Bill Viewing and Sending ---
-    const handleViewBill = (bill) => {
-        setViewingBill(bill);
-        setIsViewBillModalOpen(true);
-        setIsNewBillModalOpen(false);
-        setIsEditBillModalOpen(false);
-    };
-
-    const handlePrintBill = async () => {
-        if (!viewingBill) {
-            toast.error("No bill selected for printing.");
-            return;
-        }
-        const printContent = document.createElement('div');
-        printContent.innerHTML = `
-            <div style="font-family: sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto;">
-                <h2 style="text-align: center; color: #333; margin-bottom: 20px;">Purchase Invoice</h2>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
-                    <div><strong>Bill No:</strong> ${viewingBill.billNumber}</div>
-                    <div><strong>Date:</strong> ${viewingBill.date}</div>
-                </div>
-                <div style="margin-bottom: 20px;">
-                    <strong>Vendor:</strong> ${viewingBill.vendorName}
-                </div>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                    <thead>
-                        <tr style="background-color: #f2f2f2;">
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Product</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Batch</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Expiry</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Qty</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">PTR</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">MRP</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Disc (%)</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Tax (%)</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${viewingBill.items.map(item => `
-                            <tr>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">${item.product}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">${item.batch}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">${item.expiry}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${item.quantity}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">₹${Number(item.ptr).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">₹${Number(item.mrp).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${Number(item.discount).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${Number(item.taxRate).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">₹${Number(item.totalItemAmount).toFixed(2)}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <td colspan="8" style="border: 1px solid #ddd; padding: 8px; text-align: right; font-weight: bold;">Total Amount:</td>
-                            <td style="border: 1px solid #ddd; padding: 8px; text-align: right; font-weight: bold;">₹${Number(viewingBill.totalAmount).toFixed(2)}</td>
-                        </tr>
-                    </tfoot>
-                </table>
-                <div style="text-align: center; margin-top: 30px; font-size: 0.9em; color: #555;">
-                    Goods once sold cannot be returned.
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(printContent);
-        window.print();
-        document.body.removeChild(printContent);
-        toast.info("Preparing bill for printing...");
-    };
-
-    const handleSendBill = async (billToSend) => {
-        const targetBill = billToSend || viewingBill;
-        if (!targetBill) {
-            toast.error("No bill selected to send.");
+    // --- PDF Export ---
+    const exportBillToPDF = (bill) => {
+        const input = document.getElementById(`bill-pdf-content-${bill.id}`);
+        if (!input) {
+            toast.error("Could not find bill content for PDF export.");
             return;
         }
 
-        const tempBillContainer = document.createElement('div');
-        tempBillContainer.style.position = 'absolute';
-        tempBillContainer.style.left = '-9999px';
-        tempBillContainer.style.width = '800px';
-        tempBillContainer.innerHTML = `
-            <div style="font-family: sans-serif; padding: 20px; border: 1px solid #ccc;">
-                <h2 style="text-align: center; color: #333; margin-bottom: 20px;">Purchase Invoice</h2>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
-                    <div><strong>Bill No:</strong> ${targetBill.billNumber}</div>
-                    <div><strong>Date:</strong> ${targetBill.date}</div>
-                </div>
-                <div style="margin-bottom: 20px;">
-                    <strong>Vendor:</strong> ${targetBill.vendorName}
-                </div>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                    <thead>
-                        <tr style="background-color: #f2f2f2;">
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Product</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Batch</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Expiry</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Qty</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">PTR</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">MRP</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Disc (%)</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Tax (%)</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${targetBill.items.map(item => `
-                            <tr>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">${item.product}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">${item.batch}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">${item.expiry}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${item.quantity}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">₹${Number(item.ptr).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">₹${Number(item.mrp).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${Number(item.discount).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${Number(item.taxRate).toFixed(2)}</td>
-                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">₹${Number(item.totalItemAmount).toFixed(2)}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <td colspan="8" style="border: 1px solid #ddd; padding: 8px; text-align: right; font-weight: bold;">Total Amount:</td>
-                            <td style="border: 1px solid #ddd; padding: 8px; text-align: right; font-weight: bold;">₹${Number(targetBill.totalAmount).toFixed(2)}</td>
-                        </tr>
-                    </tfoot>
-                </table>
-                <div style="text-align: center; margin-top: 30px; font-size: 0.9em; color: #555;">
-                    Goods once sold cannot be returned.
-                </div>
-            </div>
-        `;
-        document.body.appendChild(tempBillContainer);
-
-
-        try {
-            const canvas = await html2canvas(tempBillContainer, {
-                scale: 2,
-                useCORS: true,
-            });
+        html2canvas(input, { scale: 2 }).then((canvas) => {
             const imgData = canvas.toDataURL('image/png');
             const pdf = new jsPDF('p', 'mm', 'a4');
-            const imgProps = pdf.getImageProperties(imgData);
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+            const imgWidth = 210; // A4 width in mm
+            const pageHeight = 297; // A4 height in mm
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            let heightLeft = imgHeight;
+            let position = 0;
 
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-            const pdfBlob = pdf.output('blob');
+            pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+            heightLeft -= pageHeight;
 
-            if (navigator.share) {
-                await navigator.share({
-                    files: [new File([pdfBlob], `${targetBill.billNumber}_${targetBill.vendorName}_purchase_bill.pdf`, { type: 'application/pdf' })],
-                    title: `Purchase Bill - ${targetBill.billNumber}`,
-                    text: `Here is your purchase bill from ${targetBill.date}.`,
-                });
-                toast.success("Bill shared successfully!");
-            } else {
-                const url = URL.createObjectURL(pdfBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${targetBill.billNumber}_${targetBill.vendorName}_purchase_bill.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                toast.info("Bill downloaded. You can share it manually.");
+            while (heightLeft >= 0) {
+                position = heightLeft - imgHeight;
+                pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
             }
-        } catch (error) {
-            console.error("Error sending/downloading bill:", error);
-            toast.error("Failed to generate or send bill. Please try again.");
-        } finally {
-            document.body.removeChild(tempBillContainer);
-        }
+            pdf.save(`Purchase_Bill_${bill.billNumber}.pdf`);
+            toast.success("Bill exported to PDF!");
+        }).catch(err => {
+            console.error("Error exporting to PDF:", err);
+            toast.error("Failed to export bill to PDF.");
+        });
     };
 
+    // --- Dispatch Custom Event ---
+    const dispatchDataUpdatedEvent = (eventName) => {
+        const event = new Event(eventName);
+        window.dispatchEvent(event);
+    };
 
-    const memoizedFilteredPurchaseBills = useMemo(() => filteredPurchaseBills, [filteredPurchaseBills]);
+    // --- Pagination and Sorting for All Bills ---
+    const [currentPage, setCurrentPage] = useState(1);
+    const [billsPerPage] = useState(10);
+    const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'descending' });
+
+    const sortedBills = useMemo(() => {
+        let sortableBills = [...purchaseBills];
+        if (sortConfig.key) {
+            sortableBills.sort((a, b) => {
+                let aValue = a[sortConfig.key];
+                let bValue = b[sortConfig.key];
+
+                if (sortConfig.key === 'date') {
+                    aValue = parseDate(a.date);
+                    bValue = parseDate(b.date);
+                    if (!aValue && !bValue) return 0;
+                    if (!aValue) return 1;
+                    if (!bValue) return -1;
+                } else if (typeof aValue === 'string') {
+                    aValue = aValue.toLowerCase();
+                    bValue = bValue.toLowerCase();
+                }
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'ascending' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'ascending' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortableBills;
+    }, [purchaseBills, sortConfig]);
+
+    const requestSort = (key) => {
+        let direction = 'ascending';
+        if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const indexOfLastBill = currentPage * billsPerPage;
+    const indexOfFirstBill = indexOfLastBill - billsPerPage;
+    const currentBills = sortedBills.slice(indexOfFirstBill, indexOfLastBill);
+
+    const totalPages = Math.ceil(sortedBills.length / billsPerPage);
+
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
+
+    const isLoading = purchaseBillsLoading || productsLoading || salesBillsLoading;
+
+    if (isLoading) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="loader"></div>
+                <p className="ml-4 text-gray-700">Loading data...</p>
+            </div>
+        );
+    }
+
 
     return (
-        <div>
+        <>
             <Header />
-            <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 bg-gray-50 rounded-lg shadow-inner min-h-[calc(100vh-80px)]">
-                <div className="flex justify-between items-center mb-8">
-                    <h2 className="text-3xl font-bold text-gray-800">Purchase Bills</h2>
-                    <div className="flex space-x-3">
-                        <Button
-                            onClick={() => router.push('/')}
-                            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors duration-200"
-                        >
-                            Go to Dashboard
-                        </Button>
-                        <Button
-                            onClick={handleOpenNewBillModal}
-                            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
-                        >
-                            <Plus className="mr-2 h-4 w-4" /> Add New Purchase
-                        </Button>
+            <div className="container mx-auto px-4 py-8 bg-gray-100 rounded-lg shadow-inner min-h-[calc(100vh-80px)] fade-in">
+                <h2 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-3 border-gray-300">
+                    {isEditingBill ? `Edit Purchase Bill: ${billNumber}` : "New Purchase Bill"}
+                </h2>
+
+                {/* Bill Details Form */}
+                <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
+                        <div>
+                            <label htmlFor="billNumber" className="block text-sm font-medium text-gray-700 mb-1">Bill Number</label>
+                            <input
+                                type="text"
+                                id="billNumber"
+                                value={billNumber}
+                                onChange={(e) => setBillNumber(e.target.value)}
+                                placeholder="Enter Bill Number"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="billDate" className="block text-sm font-medium text-gray-700 mb-1">Bill Date</label>
+                            <input
+                                type="text"
+                                id="billDate"
+                                value={billDate}
+                                onChange={(e) => setBillDate(e.target.value)}
+                                placeholder="DD-MM-YYYY"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="supplierName" className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
+                            <input
+                                type="text"
+                                id="supplierName"
+                                value={supplierName}
+                                onChange={(e) => setSupplierName(e.target.value)}
+                                placeholder="Enter Supplier Name"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            />
+                        </div>
                     </div>
+
+                    {/* Add Product Button */}
+                    <Button
+                        onClick={() => setIsAddProductModalOpen(true)}
+                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+                    >
+                        <Plus className="mr-2 h-5 w-5" /> Add Product
+                    </Button>
                 </div>
 
-                {/* Search Bar */}
-                <div className="mb-6">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                            type="text"
-                            placeholder="Search purchase bills by bill number, vendor, product..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ease-in-out"
-                        />
-                        {searchTerm && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSearchTerm('')}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
-                            >
-                                <X className="h-4 w-4 text-gray-500" />
-                            </Button>
-                        )}
-                    </div>
-                </div>
-
-                {/* Purchase Bills Table */}
-                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <h3 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">
-                        All Purchase Records
-                    </h3>
-                    {memoizedFilteredPurchaseBills.length === 0 && !searchTerm ? (
-                        <div className="text-center text-gray-500 py-8">
-                            <p className="text-lg mb-2">No purchase bills recorded yet.</p>
-                            <p>Click "Add New Purchase" to get started.</p>
-                        </div>
-                    ) : memoizedFilteredPurchaseBills.length === 0 && searchTerm ? (
-                        <div className="text-center text-gray-500 py-8">
-                            <p className="text-lg mb-2">No results found for "{searchTerm}".</p>
-                            <Button onClick={() => setSearchTerm('')} className="mt-4 text-sm">
-                                <RefreshCcw className="inline-block w-4 h-4 mr-2" /> Clear Search
-                            </Button>
-                        </div>
+                {/* Current Purchase Items Table */}
+                <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-4 border-b pb-3">Items in this Bill</h3>
+                    {currentPurchaseItems.length === 0 ? (
+                        <p className="text-gray-500 text-center py-4">No items added to this bill yet. Click "Add Product" to start.</p>
                     ) : (
-                        <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
+                        <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Bill No.
-                                        </th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Date
-                                        </th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Vendor Name
-                                        </th>
-                                        <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Total Amount
-                                        </th>
-                                        <th scope="col" className="relative px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Actions
-                                        </th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry (MM-YY)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity (Items)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Packs Purchased</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PTR/Item</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP/Item</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
+                                        <th scope="col" className="relative px-3 py-3"><span className="sr-only">Remove</span></th>
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
-                                    {memoizedFilteredPurchaseBills.map((bill) => (
-                                        <tr key={bill.id} className="hover:bg-gray-50 transition-colors duration-150">
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                {bill.billNumber}
+                                    {currentPurchaseItems.map((item, index) => (
+                                        <tr key={index} className="hover:bg-gray-50">
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                {item.product} ({item.unit})
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                                {bill.date}
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                <input
+                                                    type="text"
+                                                    value={item.batch}
+                                                    onChange={(e) => handleItemChange(index, 'batch', e.target.value)}
+                                                    className="w-24 p-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                                {bill.vendorName}
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                <input
+                                                    type="text"
+                                                    value={item.expiry}
+                                                    onChange={(e) => handleItemChange(index, 'expiry', e.target.value)}
+                                                    placeholder="MM-YY"
+                                                    className="w-24 p-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">
-                                                ₹{Number(bill.totalAmount).toFixed(2)}
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                <input
+                                                    type="number"
+                                                    value={item.quantity}
+                                                    onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                                                    className="w-24 p-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                                                <div className="flex items-center justify-center space-x-2">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => handleViewBill(bill)}
-                                                        className="text-blue-600 hover:text-blue-900 p-1"
-                                                        title="View Details"
-                                                    >
-                                                        <Eye className="h-5 w-5" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => handleEditBill(bill.id)}
-                                                        className="text-indigo-600 hover:text-indigo-900 p-1"
-                                                        title="Edit Bill"
-                                                    >
-                                                        <Edit className="h-5 w-5" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => handleSendBill(bill)}
-                                                        className="text-purple-600 hover:text-purple-900 p-1"
-                                                        title="Share Bill"
-                                                    >
-                                                        <Share2 className="h-5 w-5" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => handleDeleteBill(bill.id)}
-                                                        className="text-red-600 hover:text-red-900 p-1"
-                                                        title="Delete Bill"
-                                                    >
-                                                        <Trash2 className="h-5 w-5" />
-                                                    </Button>
-                                                </div>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                {/* Packs purchased is derived, not directly editable */}
+                                                {(item.quantity / item.itemsPerPack).toFixed(2)}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                <input
+                                                    type="number"
+                                                    value={item.ptr}
+                                                    onChange={(e) => handleItemChange(index, 'ptr', e.target.value)}
+                                                    className="w-24 p-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                <input
+                                                    type="number"
+                                                    value={item.mrp}
+                                                    onChange={(e) => handleItemChange(index, 'mrp', e.target.value)}
+                                                    className="w-24 p-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                <input
+                                                    type="number"
+                                                    value={item.discount}
+                                                    onChange={(e) => handleItemChange(index, 'discount', e.target.value)}
+                                                    className="w-20 p-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                ₹{Number(item.totalItemAmount).toFixed(2)}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
+                                                <Button
+                                                    onClick={() => handleRemoveItem(index)}
+                                                    className="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-100 transition-colors duration-200"
+                                                    title="Remove Item"
+                                                >
+                                                    <Trash2 className="h-5 w-5" />
+                                                </Button>
                                             </td>
                                         </tr>
                                     ))}
@@ -855,499 +806,384 @@ const PurchasePage = () => {
                             </table>
                         </div>
                     )}
+                    <div className="mt-4 text-right text-lg font-bold text-gray-800">
+                        Total Bill Amount: ₹{totalAmount.toFixed(2)}
+                    </div>
                 </div>
 
-                {/* New/Edit Purchase Bill Modal */}
-                {(isNewBillModalOpen || isEditBillModalOpen) && (
-                    <div className="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center p-4 z-50 fade-in-backdrop">
-                        <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 animate-scale-in">
-                            <div className="flex justify-between items-center mb-6 border-b pb-4">
-                                <h3 className="text-2xl font-bold text-gray-800">
-                                    {editingBillId ? 'Edit Purchase Bill' : 'New Purchase Bill'}
-                                </h3>
-                                <Button
-                                    onClick={() => { setIsNewBillModalOpen(false); setIsEditBillModalOpen(false); resetForm(); }}
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-gray-500 hover:text-gray-700"
-                                >
-                                    <X className="h-6 w-6" />
-                                </Button>
-                            </div>
-                            <form onSubmit={handleSaveBill}>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                    <div>
-                                        <label htmlFor="billNumber" className="block text-sm font-medium text-gray-700 mb-1">
+                {/* Save/Reset Bill Buttons */}
+                <div className="flex justify-end space-x-3">
+                    <Button
+                        onClick={handleSaveBill}
+                        className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
+                    >
+                        <Save className="mr-2 h-5 w-5" /> {isEditingBill ? 'Update Bill' : 'Save Bill'}
+                    </Button>
+                    <Button
+                        onClick={resetForm}
+                        className="inline-flex items-center px-6 py-3 border border-gray-300 shadow-sm text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+                    >
+                        <RefreshCcw className="mr-2 h-5 w-5" /> {isEditingBill ? 'Cancel Edit' : 'Reset Form'}
+                    </Button>
+                </div>
+
+                <hr className="my-10 border-gray-300" />
+
+                {/* All Purchase Bills Section */}
+                <h2 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-3 border-gray-300">All Purchase Bills</h2>
+                <div className="bg-white p-6 rounded-lg shadow-md">
+                    {purchaseBills.length === 0 ? (
+                        <p className="text-gray-500 text-center py-4">No purchase bills recorded yet.</p>
+                    ) : (
+                        <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
+                            <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => requestSort('billNumber')}>
                                             Bill Number
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="billNumber"
-                                            name="billNumber"
-                                            value={newBill.billNumber}
-                                            onChange={handleNewBillChange}
-                                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
-                                            Date (DD-MM-YYYY)
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="date"
-                                            name="date"
-                                            value={newBill.date}
-                                            onChange={handleNewBillChange}
-                                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                            placeholder="DD-MM-YYYY"
-                                        />
-                                    </div>
-                                    <div className="md:col-span-2">
-                                        <label htmlFor="vendorName" className="block text-sm font-medium text-gray-700 mb-1">
-                                            Vendor Name
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="vendorName"
-                                            name="vendorName"
-                                            value={newBill.vendorName}
-                                            onChange={handleNewBillChange}
-                                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                            required
-                                            list="vendorSuggestions"
-                                        />
-                                        <datalist id="vendorSuggestions">
-                                            {vendors.map((name, index) => (
-                                                <option key={index} value={name} />
-                                            ))}
-                                        </datalist>
-                                    </div>
-                                </div>
-
-                                {/* Product Item Addition */}
-                                <div className="mb-6 p-4 border border-gray-200 rounded-md bg-gray-50">
-                                    <h4 className="text-lg font-semibold text-gray-700 mb-3">Add Product to Bill</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                                        <div>
-                                            <label htmlFor="product" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Product
-                                            </label>
-                                            <div className="flex">
-                                                <input
-                                                    type="text"
-                                                    id="product"
-                                                    name="product"
-                                                    value={selectedProductInModal ? selectedProductInModal.name : ''}
-                                                    readOnly
-                                                    className="flex-grow mt-1 block w-full border border-gray-300 rounded-l-md shadow-sm py-2 px-3 focus:outline-none bg-gray-100"
-                                                    placeholder="Select a product"
-                                                />
+                                            <ArrowDownUp className="ml-1 inline h-4 w-4 text-gray-400" />
+                                        </th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => requestSort('date')}>
+                                            Date
+                                            <ArrowDownUp className="ml-1 inline h-4 w-4 text-gray-400" />
+                                        </th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => requestSort('supplierName')}>
+                                            Supplier Name
+                                            <ArrowDownUp className="ml-1 inline h-4 w-4 text-gray-400" />
+                                        </th>
+                                        <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => requestSort('totalAmount')}>
+                                            Total Amount
+                                            <ArrowDownUp className="ml-1 inline h-4 w-4 text-gray-400" />
+                                        </th>
+                                        <th scope="col" className="relative px-3 py-3"><span className="sr-only">Actions</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                    {currentBills.map((bill) => (
+                                        <tr key={bill.id} className="hover:bg-gray-50">
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{bill.billNumber}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{bill.date}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{bill.supplierName}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(bill.totalAmount).toFixed(2)}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium space-x-2">
                                                 <Button
-                                                    type="button"
-                                                    onClick={() => setIsProductSelectionModalOpen(true)}
-                                                    className="mt-1 px-4 py-2 border border-l-0 border-gray-300 rounded-r-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    onClick={() => { setSelectedBillForView(bill); setViewBillModalOpen(true); }}
+                                                    className="text-blue-600 hover:text-blue-900 p-1 rounded-full hover:bg-blue-100 transition-colors duration-200"
+                                                    title="View Bill Details"
                                                 >
-                                                    Browse
+                                                    <Eye className="h-5 w-5" />
                                                 </Button>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label htmlFor="batch" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Batch No.
-                                            </label>
-                                            <input
-                                                type="text"
-                                                id="batch"
-                                                name="batch"
-                                                value={itemDetails.batch}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="expiry" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Expiry (MM-YY)
-                                            </label>
-                                            <input
-                                                type="text"
-                                                id="expiry"
-                                                name="expiry"
-                                                value={itemDetails.expiry}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                placeholder="MM-YY"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Quantity (Items)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="quantity"
-                                                name="quantity"
-                                                value={itemDetails.quantity}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                min="1"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="itemsPerPack" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Items per Pack
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="itemsPerPack"
-                                                name="itemsPerPack"
-                                                value={itemDetails.itemsPerPack}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-gray-100"
-                                                min="1"
-                                                readOnly // Usually from product master
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="packsPurchased" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Packs Purchased
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="packsPurchased"
-                                                name="packsPurchased"
-                                                value={itemDetails.packsPurchased = Math.ceil(itemDetails.quantity / itemDetails.itemsPerPack) || ''}
-                                                readOnly
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none bg-gray-100"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="ptr" className="block text-sm font-medium text-gray-700 mb-1">
-                                                PTR (₹)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="ptr"
-                                                name="ptr"
-                                                value={itemDetails.ptr}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                min="0"
-                                                step="0.01"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="mrp" className="block text-sm font-medium text-gray-700 mb-1">
-                                                MRP (₹)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="mrp"
-                                                name="mrp"
-                                                value={itemDetails.mrp}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                min="0"
-                                                step="0.01"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="discount" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Discount (%)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="discount"
-                                                name="discount"
-                                                value={itemDetails.discount}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                min="0"
-                                                max="100"
-                                                step="0.01"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="taxRate" className="block text-sm font-medium text-gray-700 mb-1">
-                                                Tax Rate (%)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                id="taxRate"
-                                                name="taxRate"
-                                                value={itemDetails.taxRate}
-                                                onChange={handleItemDetailsChange}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                min="0"
-                                                max="100"
-                                                step="0.01"
-                                                readOnly={!selectedProductInModal}
-                                            />
-                                        </div>
-                                        <div className="lg:col-span-3 flex justify-end">
-                                            <Button
-                                                type="button"
-                                                onClick={handleAddItem}
-                                                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
-                                                disabled={!selectedProductInModal || !itemDetails.quantity || Number(itemDetails.quantity) <= 0 || !itemDetails.ptr || Number(itemDetails.ptr) <= 0 || !itemDetails.mrp || Number(itemDetails.mrp) <= 0 || !itemDetails.batch || !itemDetails.expiry}
-                                            >
-                                                <Plus className="mr-2 h-4 w-4" /> Add Item
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Items in Current Bill */}
-                                <div className="mb-6">
-                                    <h4 className="text-lg font-semibold text-gray-700 mb-3">Bill Items ({newBill.items.length})</h4>
-                                    {newBill.items.length > 0 ? (
-                                        <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
-                                            <table className="min-w-full divide-y divide-gray-200">
-                                                <thead className="bg-gray-50">
-                                                    <tr>
-                                                        <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                                                        <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
-                                                        <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                                                        <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                                                        <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">PTR</th>
-                                                        <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
-                                                        <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Disc (%)</th>
-                                                        <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Tax (%)</th>
-                                                        <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                                                        <th scope="col" className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="bg-white divide-y divide-gray-200">
-                                                    {newBill.items.map((item, index) => (
-                                                        <tr key={index}>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{item.product}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700">{item.batch}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700">{item.expiry}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{item.quantity}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">₹{Number(item.ptr).toFixed(2)}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">₹{Number(item.mrp).toFixed(2)}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{Number(item.discount).toFixed(2)}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{Number(item.taxRate).toFixed(2)}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">₹{Number(item.totalItemAmount).toFixed(2)}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-center text-sm font-medium">
-                                                                <Button
-                                                                    type="button"
-                                                                    onClick={() => handleRemoveItem(index)}
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="text-red-600 hover:text-red-900 p-1"
-                                                                    title="Remove Item"
-                                                                >
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                </Button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                    <tr>
-                                                        <td colSpan="8" className="px-4 py-2 text-right font-bold text-gray-900 border-t">Total Bill Amount:</td>
-                                                        <td className="px-4 py-2 text-right font-bold text-gray-900 border-t">₹{Number(newBill.totalAmount).toFixed(2)}</td>
-                                                        <td></td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    ) : (
-                                        <p className="text-gray-500 text-center py-4">No items added to the bill yet.</p>
-                                    )}
-                                </div>
-
-                                <div className="flex justify-end space-x-3 mt-6">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => { setIsNewBillModalOpen(false); setIsEditBillModalOpen(false); resetForm(); }}
-                                        className="px-6 py-2"
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        className="inline-flex items-center px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                                    >
-                                        <Save className="mr-2 h-4 w-4" /> {editingBillId ? 'Update Bill' : 'Save Bill'}
-                                    </Button>
-                                </div>
-                            </form>
+                                                <Button
+                                                    onClick={() => handleEditBill(bill.id)}
+                                                    className="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-100 transition-colors duration-200"
+                                                    title="Edit Bill"
+                                                >
+                                                    <Edit className="h-5 w-5" />
+                                                </Button>
+                                                <Button
+                                                    onClick={() => handleDeleteBill(bill.id)}
+                                                    className="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-100 transition-colors duration-200"
+                                                    title="Delete Bill"
+                                                >
+                                                    <Trash2 className="h-5 w-5" />
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Product Selection Modal */}
-                {isProductSelectionModalOpen && (
-                    <div className="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center p-4 z-50 fade-in-backdrop">
-                        <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 animate-scale-in">
-                            <div className="flex justify-between items-center mb-6 border-b pb-4">
-                                <h3 className="text-2xl font-bold text-gray-800">Select Product</h3>
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-center items-center space-x-2 mt-4">
+                            <Button
+                                onClick={() => paginate(currentPage - 1)}
+                                disabled={currentPage === 1}
+                                className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                                title="Previous Page"
+                            >
+                                <ChevronLeft className="h-5 w-5" />
+                            </Button>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
                                 <Button
-                                    onClick={() => setIsProductSelectionModalOpen(false)}
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-gray-500 hover:text-gray-700"
+                                    key={page}
+                                    onClick={() => paginate(page)}
+                                    className={`px-3 py-1 rounded-md ${currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                                 >
-                                    <X className="h-6 w-6" />
+                                    {page}
                                 </Button>
-                            </div>
+                            ))}
+                            <Button
+                                onClick={() => paginate(currentPage + 1)}
+                                disabled={currentPage === totalPages}
+                                className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                                title="Next Page"
+                            >
+                                <ChevronRight className="h-5 w-5" />
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Add Product Modal */}
+            {isAddProductModalOpen && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50 animate-fade-in-backdrop">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl animate-scale-in flex flex-col max-h-[90vh]">
+                        <div className="modal-sticky-header p-6 border-b border-gray-200 flex justify-between items-center">
+                            <h3 className="text-xl font-semibold text-gray-800">Add Product to Bill</h3>
+                            <Button
+                                onClick={() => setIsAddProductModalOpen(false)}
+                                className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                                title="Close"
+                            >
+                                <X className="h-6 w-6 text-gray-600" />
+                            </Button>
+                        </div>
+                        <div className="p-6 flex-grow overflow-y-auto">
                             <div className="mb-4">
+                                <label htmlFor="productSearch" className="block text-sm font-medium text-gray-700 mb-1">Search Product</label>
                                 <input
                                     type="text"
-                                    placeholder="Search products..."
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                    onChange={(e) => {
-                                        const searchTermLower = e.target.value.toLowerCase();
-                                        // Filter against the full list of products (re-load for accuracy or pass original list)
-                                        const allProducts = JSON.parse(localStorage.getItem('products') || '[]');
-                                        const filtered = allProducts.filter(p =>
-                                            p.name.toLowerCase().includes(searchTermLower) ||
-                                            p.category.toLowerCase().includes(searchTermLower) ||
-                                            p.company.toLowerCase().includes(searchTermLower)
-                                        );
-                                        setProducts(filtered); // Temporarily update visible product list in modal
-                                    }}
+                                    id="productSearch"
+                                    value={productSearchTerm}
+                                    onChange={(e) => setProductSearchTerm(e.target.value)}
+                                    placeholder="Search by name, category, company, or batch"
+                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                                 />
                             </div>
-                            <div className="overflow-y-auto max-h-96 border border-gray-200 rounded-md">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
-                                            <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Stock</th>
-                                            <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
-                                            <th scope="col" className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                        {products.length > 0 ? (
-                                            products.map((product) => (
-                                                <tr key={product.id} className="hover:bg-gray-50 cursor-pointer">
-                                                    <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{product.name}</td>
-                                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700">{product.quantity} {product.unit || 'items'}</td>
-                                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700">₹{Number(product.mrp).toFixed(2)}</td>
-                                                    <td className="px-4 py-2 whitespace-nowrap text-center">
+
+                            {/* Product Search Results */}
+                            {filterProducts.length > 0 && (
+                                <div className="mb-4 max-h-60 overflow-y-auto border border-gray-200 rounded-md shadow-sm">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50 sticky top-0">
+                                            <tr>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Stock (Items)</th>
+                                                <th scope="col" className="relative px-3 py-2"><span className="sr-only">Select</span></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                            {filterProducts.map((product) => (
+                                                <tr key={product.id} className="hover:bg-gray-100 cursor-pointer" onClick={() => handleProductSelect(product)}>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{product.name}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.category}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.company}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.calculatedCurrentStock}</td> {/* Use calculated stock */}
+                                                    <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
                                                         <Button
-                                                            size="sm"
-                                                            onClick={() => handleProductSelection(product.id)}
-                                                            className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md text-xs"
+                                                            onClick={() => handleProductSelect(product)}
+                                                            className="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-100"
                                                         >
                                                             Select
                                                         </Button>
                                                     </td>
                                                 </tr>
-                                            ))
-                                        ) : (
-                                            <tr>
-                                                <td colSpan="4" className="px-4 py-4 text-center text-sm text-gray-500">No products found. Add products in the Product Master.</td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            {selectedProduct && (
+                                <div className="mt-4 p-4 border border-blue-200 bg-blue-50 rounded-md">
+                                    <h4 className="text-lg font-semibold text-blue-800 mb-2">Selected Product: {selectedProduct.name}</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label htmlFor="newBatch" className="block text-sm font-medium text-gray-700 mb-1">Batch Number</label>
+                                            <input
+                                                type="text"
+                                                id="newBatch"
+                                                value={newBatch}
+                                                onChange={(e) => setNewBatch(e.target.value)}
+                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="newExpiry" className="block text-sm font-medium text-gray-700 mb-1">Expiry Date (MM-YY)</label>
+                                            <input
+                                                type="text"
+                                                id="newExpiry"
+                                                value={newExpiry}
+                                                onChange={(e) => setNewExpiry(e.target.value)}
+                                                placeholder="MM-YY"
+                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="newQuantity" className="block text-sm font-medium text-gray-700 mb-1">Quantity (Items)</label>
+                                            <input
+                                                type="number"
+                                                id="newQuantity"
+                                                value={newQuantity}
+                                                onChange={(e) => setNewQuantity(e.target.value)}
+                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="newPTR" className="block text-sm font-medium text-gray-700 mb-1">PTR/Item</label>
+                                            <input
+                                                type="number"
+                                                id="newPTR"
+                                                value={newPTR}
+                                                onChange={(e) => setNewPTR(e.target.value)}
+                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="newMRP" className="block text-sm font-medium text-gray-700 mb-1">MRP/Item</label>
+                                            <input
+                                                type="number"
+                                                id="newMRP"
+                                                value={newMRP}
+                                                onChange={(e) => setNewMRP(e.target.value)}
+                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="newDiscount" className="block text-sm font-medium text-gray-700 mb-1">Discount (%)</label>
+                                            <input
+                                                type="number"
+                                                id="newDiscount"
+                                                value={newDiscount}
+                                                onChange={(e) => setNewDiscount(e.target.value)}
+                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="modal-sticky-footer p-6 border-t border-gray-200 flex justify-end space-x-3">
+                            <Button
+                                onClick={() => setIsAddProductModalOpen(false)}
+                                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors duration-200"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handleAddProductToBill}
+                                className="px-4 py-2 border border-transparent rounded-md text-white bg-indigo-600 hover:bg-indigo-700 transition-colors duration-200"
+                            >
+                                Add to Bill
+                            </Button>
                         </div>
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* View Purchase Bill Modal */}
-                {isViewBillModalOpen && viewingBill && (
-                    <div className="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center p-4 z-50 fade-in-backdrop">
-                        <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 animate-scale-in" ref={billRef}>
-                            <div className="flex justify-between items-center mb-6 border-b pb-4">
-                                <h3 className="text-2xl font-bold text-gray-800">Purchase Bill Details</h3>
-                                <Button
-                                    onClick={() => { setViewingBill(null); setIsViewBillModalOpen(false); }}
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-gray-500 hover:text-gray-700"
-                                >
-                                    <X className="h-6 w-6" />
-                                </Button>
-                            </div>
 
+            {/* View Bill Modal */}
+            {viewBillModalOpen && selectedBillForView && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50 animate-fade-in-backdrop">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl animate-scale-in flex flex-col max-h-[90vh]">
+                        <div className="modal-sticky-header p-6 border-b border-gray-200 flex justify-between items-center">
+                            <h3 className="text-xl font-semibold text-gray-800">View Purchase Bill: {selectedBillForView.billNumber}</h3>
+                            <Button
+                                onClick={() => setViewBillModalOpen(false)}
+                                className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                                title="Close"
+                            >
+                                <X className="h-6 w-6 text-gray-600" />
+                            </Button>
+                        </div>
+                        <div className="p-6 flex-grow overflow-y-auto" id={`bill-pdf-content-${selectedBillForView.id}`}>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                                 <div>
                                     <p className="text-sm font-medium text-gray-700">Bill Number:</p>
-                                    <p className="text-lg font-semibold text-gray-900">{viewingBill.billNumber}</p>
+                                    <p className="text-md text-gray-900 font-semibold">{selectedBillForView.billNumber}</p>
                                 </div>
                                 <div>
-                                    <p className="text-sm font-medium text-gray-700">Date:</p>
-                                    <p className="text-lg font-semibold text-gray-900">{viewingBill.date}</p>
+                                    <p className="text-sm font-medium text-gray-700">Bill Date:</p>
+                                    <p className="text-md text-gray-900 font-semibold">{selectedBillForView.date}</p>
                                 </div>
                                 <div className="md:col-span-2">
-                                    <p className="text-sm font-medium text-gray-700">Vendor Name:</p>
-                                    <p className="text-xl font-semibold text-gray-900">{viewingBill.vendorName}</p>
+                                    <p className="text-sm font-medium text-gray-700">Supplier Name:</p>
+                                    <p className="text-md text-gray-900 font-semibold">{selectedBillForView.supplierName}</p>
                                 </div>
                             </div>
 
-                            <h4 className="text-lg font-semibold text-gray-700 mb-3">Items Purchased:</h4>
-                            <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm mb-6">
+                            <h4 className="text-lg font-semibold text-gray-800 mb-3 border-b pb-2">Items Purchased</h4>
+                            <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                                            <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
-                                            <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                                            <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                                            <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">PTR</th>
-                                            <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
-                                            <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Disc (%)</th>
-                                            <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Tax (%)</th>
-                                            <th scope="col" className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty (Items)</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PTR/Item</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP/Item</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
-                                        {viewingBill.items.map((item, index) => (
+                                        {selectedBillForView.items.map((item, index) => (
                                             <tr key={index}>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{item.product}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700">{item.batch}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700">{item.expiry}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{item.quantity}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">₹{Number(item.ptr).toFixed(2)}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">₹{Number(item.mrp).toFixed(2)}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{Number(item.discount).toFixed(2)}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{Number(item.taxRate).toFixed(2)}</td>
-                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">₹{Number(item.totalItemAmount).toFixed(2)}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{item.product} ({item.unit})</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.batch}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.expiry}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.quantity}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.ptr).toFixed(2)}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.mrp).toFixed(2)}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{Number(item.discount).toFixed(2)}%</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.totalItemAmount).toFixed(2)}</td>
                                             </tr>
                                         ))}
-                                        <tr>
-                                            <td colSpan="8" className="px-4 py-2 text-right font-bold text-gray-900 border-t">Total Bill Amount:</td>
-                                            <td className="px-4 py-2 text-right font-bold text-gray-900 border-t">₹{Number(viewingBill.totalAmount).toFixed(2)}</td>
-                                        </tr>
                                     </tbody>
                                 </table>
                             </div>
-
-                            <div className="flex justify-end space-x-3 mt-6">
-                                <Button
-                                    onClick={handlePrintBill}
-                                    className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                                >
-                                    <Printer className="mr-2 h-4 w-4" /> Print Bill
-                                </Button>
-                                <Button
-                                    onClick={() => handleSendBill(viewingBill)} // Pass viewingBill explicitly
-                                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                                >
-                                    <Share2 className="mr-2 h-4 w-4" /> Send Bill
-                                </Button>
+                            <div className="mt-6 text-right text-xl font-bold text-gray-800">
+                                Total Bill Amount: ₹{Number(selectedBillForView.totalAmount).toFixed(2)}
                             </div>
                         </div>
+                        <div className="modal-sticky-footer p-6 border-t border-gray-200 flex justify-end space-x-3">
+                            <Button
+                                onClick={() => exportBillToPDF(selectedBillForView)}
+                                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200"
+                            >
+                                <Printer className="mr-2 h-5 w-5" /> Export to PDF
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    // This assumes you have a way to share the PDF, e.g., via a generated link
+                                    // or by triggering a native share dialog. For now, it's a placeholder.
+                                    toast.info("Share functionality coming soon!");
+                                }}
+                                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors duration-200"
+                            >
+                                <Share2 className="mr-2 h-5 w-5" /> Share Bill
+                            </Button>
+                        </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
+
             <style jsx>{`
-                .fade-in-backdrop {
+                /* Loader styles */
+                .loader {
+                    border: 4px solid #f3f3f3; /* Light grey */
+                    border-top: 4px solid #3498db; /* Blue */
+                    border-radius: 50%;
+                    width: 40px;
+                    height: 40px;
+                    animation: spin 1s linear infinite;
+                }
+
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+
+                /* Fade-in animations */
+                .animate-fade-in-backdrop {
                     animation: fadeInBackdrop 0.3s ease-out forwards;
-                    opacity: 0;
                 }
                 @keyframes fadeInBackdrop {
                     0% { opacity: 0; }
@@ -1364,14 +1200,27 @@ const PurchasePage = () => {
 
                 .fade-in {
                     animation: fadeIn 0.5s ease-out forwards;
-                    opacity: 0;
                 }
                 @keyframes fadeIn {
                     0% { opacity: 0; transform: translateY(20px); }
                     100% { opacity: 1; transform: translateY(0); }
                 }
+
+                /* Styles for sticky header in modals if needed, though overflow-y on modal box is primary */
+                .modal-sticky-header {
+                    position: sticky;
+                    top: 0;
+                    background-color: white; /* or theme background */
+                    z-index: 10; /* Ensure it's above content but below modal controls if separate */
+                }
+                .modal-sticky-footer {
+                     position: sticky;
+                    bottom: 0;
+                    background-color: white; /* or theme background */
+                    z-index: 10;
+                }
             `}</style>
-        </div>
+        </>
     );
 };
 

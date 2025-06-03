@@ -1,4 +1,4 @@
-// app/productmaster/page.js
+// app/components/productmaster
 "use client"; // This directive is needed for client-side functionality
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -43,6 +43,7 @@ const ProductMasterPage = () => {
         minStock: '',
         maxStock: '',
         mrp: '',
+        salePrice: '', // NEW: Added salePrice field
         discount: '',
         taxRate: '',
     });
@@ -93,6 +94,7 @@ const ProductMasterPage = () => {
                     minStock: Number(product.minStock) || 0,
                     maxStock: Number(product.maxStock) || 0,
                     mrp: Number(product.mrp) || 0,
+                    salePrice: Number(product.salePrice) || 0, // NEW: Parse salePrice
                     discount: Number(product.discount) || 0,
                     taxRate: Number(product.taxRate) || 0,
                     quantity: Number(product.quantity) || 0, // Ensure quantity is a number
@@ -129,6 +131,7 @@ const ProductMasterPage = () => {
                            minStock: Number(product.minStock) || 0,
                            maxStock: Number(product.maxStock) || 0,
                            mrp: Number(product.mrp) || 0,
+                           salePrice: Number(product.salePrice) || 0, // NEW: Parse salePrice on update
                            discount: Number(product.discount) || 0,
                            taxRate: Number(product.taxRate) || 0,
                            quantity: Number(product.quantity) || 0,
@@ -175,7 +178,7 @@ const ProductMasterPage = () => {
     // Validate form data
     const validateForm = () => {
         console.log("Validating form:", productForm);
-        const { name, unit, itemsPerPack, mrp, taxRate, discount, minStock, maxStock } = productForm;
+        const { name, unit, itemsPerPack, mrp, salePrice, taxRate, discount, minStock, maxStock } = productForm; // NEW: Added salePrice
 
         if (!name.trim()) {
             toast.error('Product Name is required.'); console.log("Validation failed: Name empty."); return false;
@@ -193,6 +196,16 @@ const ProductMasterPage = () => {
         if (mrp.trim() === '' || isNaN(mrpNum) || mrpNum < 0) {
             toast.error('Valid "MRP" is required and must be >= 0.'); console.log("Validation failed: Invalid MRP."); return false;
         }
+
+        // NEW: Validate salePrice
+        const salePriceNum = Number(salePrice);
+        if (salePrice.trim() !== '' && (isNaN(salePriceNum) || salePriceNum < 0)) {
+            toast.error('Valid "Sale Price" must be a non-negative number if entered.'); console.log("Validation failed: Invalid Sale Price."); return false;
+        }
+        if (salePrice.trim() !== '' && mrp.trim() !== '' && salePriceNum > mrpNum) {
+            toast.error('Sale Price cannot be greater than MRP.'); console.log("Validation failed: Sale Price > MRP."); return false;
+        }
+
 
         const taxRateNum = Number(taxRate);
         if (taxRate.trim() !== '' && (isNaN(taxRateNum) || taxRateNum < 0 || taxRateNum > 100)) {
@@ -242,6 +255,7 @@ const ProductMasterPage = () => {
             minStock: Number(productForm.minStock) || 0,
             maxStock: Number(productForm.maxStock) || 0,
             mrp: Number(productForm.mrp),
+            salePrice: Number(productForm.salePrice) || 0, // NEW: Save salePrice
             discount: Number(productForm.discount) || 0,
             taxRate: Number(productForm.taxRate) || 0,
             // Preserve existing quantity if editing, otherwise start at 0
@@ -284,91 +298,71 @@ const ProductMasterPage = () => {
             window.dispatchEvent(new Event('productsUpdated'));
             console.log("'productsUpdated' event dispatched.");
         } catch (error) {
-             console.error("Error saving products to localStorage:", error);
-             toast.error("Error saving product data. Local storage might be full.");
+            console.error("Error saving products to localStorage:", error);
+            toast.error("Failed to save product data.");
         }
 
-        resetForm();
-        console.log("Form reset after save.");
+        handleClearForm(); // Clear the form after saving
+    };
+
+    // Handle deleting a product
+    const handleDeleteProduct = (id, name) => {
+        console.log(`Attempting to delete product with ID: ${id}, Name: ${name}`);
+        if (window.confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
+            const updatedProducts = products.filter(p => p.id !== id);
+            setProducts(updatedProducts);
+            try {
+                localStorage.setItem('products', JSON.stringify(updatedProducts));
+                console.log("Product deleted and products saved to localStorage.");
+                window.dispatchEvent(new Event('productsUpdated'));
+                toast.success(`Product "${name}" deleted successfully.`);
+            } catch (error) {
+                console.error("Error deleting product from localStorage:", error);
+                toast.error("Failed to delete product.");
+            }
+        }
     };
 
     // Handle editing a product
     const handleEditProduct = (product) => {
-        console.log("Initiating edit for product:", product.name);
+        console.log("Setting product for edit:", product);
         setEditingProduct(product);
         setProductForm({
-            name: product.name || '',
-            unit: product.unit || '',
-            category: product.category || '',
-            company: product.company || '',
-            itemsPerPack: String(product.itemsPerPack ?? '') || '',
-            minStock: String(product.minStock ?? '') || '',
-            maxStock: String(product.maxStock ?? '') || '',
-            mrp: String(product.mrp ?? '') || '',
-            discount: String(product.discount ?? '') || '',
-            taxRate: String(product.taxRate ?? '') || '',
+            name: product.name,
+            unit: product.unit,
+            category: product.category,
+            company: product.company,
+            itemsPerPack: product.itemsPerPack,
+            minStock: product.minStock,
+            maxStock: product.maxStock,
+            mrp: product.mrp,
+            salePrice: product.salePrice, // NEW: Load salePrice for editing
+            discount: product.discount,
+            taxRate: product.taxRate,
         });
-        window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to top to show the form
-        console.log("Product form populated for editing.");
+        window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to top of the form
     };
 
-    // Handle deleting a product
-    const handleDeleteProduct = (productId, productName) => {
-         console.log(`Attempting to delete product ID: ${productId}, Name: "${productName}"`);
-        // Enhanced confirmation dialog using Sonner
-        toast(
-            <div>
-                <p className="font-semibold">Confirm Deletion</p>
-                <p className="text-sm text-gray-600 mt-1">
-                    Are you sure you want to delete product "{productName}"?
-                    This action cannot be undone and will not adjust stock in past transactions.
-                </p>
-            </div>,
-            {
-                action: {
-                    label: 'Delete',
-                    onClick: () => {
-                        console.log("User confirmed deletion.");
-                        const updatedProducts = products.filter(p => p.id !== productId);
-                        setProducts(updatedProducts);
-                        try {
-                            localStorage.setItem('products', JSON.stringify(updatedProducts));
-                            console.log("Products saved to localStorage after deletion.");
-                            window.dispatchEvent(new Event('productsUpdated')); // Dispatch event
-                            console.log("'productsUpdated' event dispatched after deletion.");
-                        } catch (error) {
-                             console.error("Error saving products after deletion to localStorage:", error);
-                             toast.error("Error saving product data after deletion.");
-                        }
-                        toast.success(`Product "${productName}" deleted.`);
-                        console.log(`Product "${productName}" deleted successfully.`);
-                        if (editingProduct && editingProduct.id === productId) {
-                            resetForm();
-                            console.log("Deleted product was being edited. Form reset.");
-                        }
-                    },
-                },
-                cancel: {
-                    label: 'Cancel',
-                    onClick: () => { console.log("Deletion cancelled by user."); /* Do nothing */ },
-                },
-                duration: 10000, // Keep toast longer for confirmation
-            }
-        );
-    };
-
-    // Reset the form and editing state
-    const resetForm = useCallback(() => {
-        console.log("Resetting product form.");
+    // Clear form and reset editing state
+    const handleClearForm = () => {
+        console.log("Clearing form and resetting editing state.");
         setProductForm({
-            name: '', unit: '', category: '', company: '', itemsPerPack: '',
-            minStock: '', maxStock: '', mrp: '', discount: '', taxRate: '',
+            name: '',
+            unit: '',
+            category: '',
+            company: '',
+            itemsPerPack: '',
+            minStock: '',
+            maxStock: '',
+            mrp: '',
+            salePrice: '', // NEW: Clear salePrice
+            discount: '',
+            taxRate: '',
         });
         setEditingProduct(null);
-        console.log("Product form reset.");
-    }, []); // No dependencies, can be memoized
+    };
 
-    // Handler for sorting column
+    // Handle sorting columns
     const handleSort = (column) => {
         if (sortColumn === column) {
             setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -377,387 +371,513 @@ const ProductMasterPage = () => {
             setSortDirection('asc');
         }
         setCurrentPage(1); // Reset to first page on sort
+        console.log(`Sorting by column: ${column}, direction: ${sortDirection}`);
     };
 
-    // Derived state for filtered and sorted products
-    const currentFilteredAndSortedProducts = useMemo(() => {
-        console.log("Filtering and sorting products based on query and sort state...");
-        const query = searchQuery.toLowerCase();
-        const filtered = products.filter(product => {
-            const nameMatch = product.name && product.name.toLowerCase().includes(query);
-            const unitMatch = product.unit && product.unit.toLowerCase().includes(query);
-            const categoryMatch = product.category && product.category.toLowerCase().includes(query);
-            const companyMatch = product.company && product.company.toLowerCase().includes(query);
-            return nameMatch || unitMatch || categoryMatch || companyMatch;
-        });
+    // Memoized filtered and sorted products for display
+    const filteredAndSortedProducts = useMemo(() => {
+        console.log("useMemo: Filtering and sorting products...");
+        let filtered = products.filter(product =>
+            product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            product.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            product.company.toLowerCase().includes(searchQuery.toLowerCase())
+        );
 
-        // Apply sorting
-        const sorted = [...filtered].sort((a, b) => {
-            const aValue = a[sortColumn];
-            const bValue = b[sortColumn];
+        if (sortColumn) {
+            filtered.sort((a, b) => {
+                const aValue = typeof a[sortColumn] === 'string' ? a[sortColumn].toLowerCase() : a[sortColumn];
+                const bValue = typeof b[sortColumn] === 'string' ? b[sortColumn].toLowerCase() : b[sortColumn];
 
-            // Handle numeric comparisons
-            if (typeof aValue === 'number' && typeof bValue === 'number') {
-                return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
-            }
-            // Handle string comparisons
-            if (aValue && bValue) {
-                const comparison = String(aValue).toLowerCase().localeCompare(String(bValue).toLowerCase());
-                return sortDirection === 'asc' ? comparison : -comparison;
-            }
-            // Fallback for null/undefined values or mixed types
-            return 0;
-        });
-
-        console.log("Filtered and sorted products count:", sorted.length);
-        return sorted;
+                if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+                if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+        console.log(`useMemo: Found ${filtered.length} filtered and sorted products.`);
+        return filtered;
     }, [products, searchQuery, sortColumn, sortDirection]);
 
     // Pagination logic
-    const totalPages = Math.ceil(currentFilteredAndSortedProducts.length / productsPerPage);
     const indexOfLastProduct = currentPage * productsPerPage;
     const indexOfFirstProduct = indexOfLastProduct - productsPerPage;
-    const currentProducts = currentFilteredAndSortedProducts.slice(indexOfFirstProduct, indexOfLastProduct);
+    const currentFilteredAndSortedProducts = useMemo(() => {
+        console.log("useMemo: Slicing products for current page.");
+        return filteredAndSortedProducts.slice(indexOfFirstProduct, indexOfLastProduct);
+    }, [filteredAndSortedProducts, indexOfFirstProduct, indexOfLastProduct]);
 
-    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+    const totalPages = Math.ceil(filteredAndSortedProducts.length / productsPerPage);
 
-    // Get the current sort icon based on column and direction
-    const getSortIcon = (column) => {
-        if (sortColumn === column) {
-            return sortDirection === 'asc' ? '▲' : '▼';
+    const paginate = (pageNumber) => {
+        if (pageNumber >= 1 && pageNumber <= totalPages) {
+            setCurrentPage(pageNumber);
+            console.log(`Paginating to page: ${pageNumber}`);
         }
-        return '';
     };
 
     return (
-        <> {/* Using React Fragment */}
+        <>
             <Header />
-            {/* Added fade-in class to the main container */}
-            <div className="min-h-screen bg-slate-50 p-4 md:p-6 lg:p-8 antialiased text-gray-800 fade-in">
-                <div className="container mx-auto">
-                    {/* Product Form Section */}
-                    <div className="bg-white p-6 rounded-xl shadow-xl mb-8">
-                        <div className="flex flex-wrap justify-between items-center mb-6 border-b border-gray-200 pb-4">
-                            <h1 className="text-2xl sm:text-3xl font-bold text-gray-700 flex items-center">
-                                <Package className="mr-3 h-7 w-7 text-indigo-600" />
-                                {editingProduct ? 'Edit Product' : 'Add New Product'}
-                            </h1>
-                            <Button
-                                onClick={() => router.push("/")}
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow hover:shadow-md transition-all duration-150 text-sm font-medium flex items-center"
-                            >
-                                Go to Dashboard
-                            </Button>
+            <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 bg-gray-100 rounded-lg shadow-inner fade-in">
+                <div className="flex justify-between items-center mb-8">
+                    <h2 className="text-3xl font-bold text-gray-800">Product Master</h2>
+                    <Button
+                        onClick={() => router.push('/')}
+                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+                    >
+                        Go to Dashboard
+                    </Button>
+                </div>
+
+                {/* Product Form */}
+                <div className="bg-white p-6 rounded-lg shadow-md mb-8 border border-gray-200">
+                    <h3 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">
+                        {editingProduct ? 'Edit Product' : 'Add New Product'}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {/* Product Name */}
+                        <div className="mb-4">
+                            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
+                                <Tag className="inline-block h-4 w-4 mr-1 text-gray-500" />Product Name
+                            </label>
+                            <input
+                                type="text"
+                                id="name"
+                                name="name"
+                                value={productForm.name}
+                                onChange={handleInputChange}
+                                placeholder="e.g., Paracetamol 500mg"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            />
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
-                            {/* Input fields rendered directly */}
-                            <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <Tag className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="name" // Still using key for consistency
-                                    type="text"
-                                    name="name"
-                                    placeholder="Product Name (Required)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.name}
-                                    onChange={handleInputChange}
-                                    required
-                                    list="product-suggestions" // Re-added list attribute
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <Ruler className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="unit"
-                                    type="text"
-                                    name="unit"
-                                    placeholder="Unit (e.g., Pcs) (Required)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.unit}
-                                    onChange={handleInputChange}
-                                    required
-                                    list="unit-suggestions" // Re-added list attribute
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <List className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="category"
-                                    type="text"
-                                    name="category"
-                                    placeholder="Category"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.category}
-                                    onChange={handleInputChange}
-                                     list="category-suggestions" // Re-added list attribute
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <Building2 className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="company"
-                                    type="text"
-                                    name="company"
-                                    placeholder="Company/Manufacturer"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.company}
-                                    onChange={handleInputChange}
-                                     list="company-suggestions" // Re-added list attribute
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <Boxes className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="itemsPerPack"
-                                    type="number"
-                                    name="itemsPerPack"
-                                    placeholder="Items per Pack (Required)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.itemsPerPack}
-                                    onChange={handleInputChange}
-                                    required
-                                    min="1"
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <IndianRupee className="h-5 w-5 text-gray-400 mx-3 shrink-0" /> {/* Changed from DollarSign */}
-                                <input
-                                    key="mrp"
-                                    type="number"
-                                    name="mrp"
-                                    placeholder="MRP (per Item) (Required)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.mrp}
-                                    onChange={handleInputChange}
-                                    required
-                                    min="0"
-                                    step="0.01"
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <ArrowDownCircle className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="minStock"
-                                    type="number"
-                                    name="minStock"
-                                    placeholder="Min Stock (Items)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.minStock}
-                                    onChange={handleInputChange}
-                                    min="0"
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <ArrowUpCircle className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="maxStock"
-                                    type="number"
-                                    name="maxStock"
-                                    placeholder="Max Stock (Items)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.maxStock}
-                                    onChange={handleInputChange}
-                                    min="0"
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <Percent className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="discount"
-                                    type="number"
-                                    name="discount"
-                                    placeholder="Discount (%)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.discount}
-                                    onChange={handleInputChange}
-                                    min="0"
-                                    max="100"
-                                />
-                            </div>
-                             <div className="flex items-center border border-gray-300 rounded-lg shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-150">
-                                <Scale className="h-5 w-5 text-gray-400 mx-3 shrink-0" />
-                                <input
-                                    key="taxRate"
-                                    type="number"
-                                    name="taxRate"
-                                    placeholder="Tax Rate (%)"
-                                    className="p-3 w-full focus:outline-none text-gray-700 placeholder-gray-400 bg-white"
-                                    value={productForm.taxRate}
-                                    onChange={handleInputChange}
-                                    min="0"
-                                    max="100"
-                                />
-                            </div>
+                        {/* Unit */}
+                        <div className="mb-4">
+                            <label htmlFor="unit" className="block text-sm font-medium text-gray-700 mb-1">
+                                <Ruler className="inline-block h-4 w-4 mr-1 text-gray-500" />Unit
+                            </label>
+                            <input
+                                type="text"
+                                id="unit"
+                                name="unit"
+                                value={productForm.unit}
+                                onChange={handleInputChange}
+                                placeholder="e.g., Pcs, Bottle, Strip"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                list="predefinedUnits"
+                            />
+                            <datalist id="predefinedUnits">
+                                {predefinedUnits.map((unit, index) => (
+                                    <option key={index} value={unit} />
+                                ))}
+                            </datalist>
                         </div>
 
-                        {/* Datalists for suggestions */}
-                        <datalist id="product-suggestions">
-                             {products.map((product, index) => <option key={`prod-sugg-${index}`} value={product.name} />)}
-                         </datalist>
-                        <datalist id="unit-suggestions">
-                            {predefinedUnits.map((unit, index) => <option key={`unit-${index}`} value={unit} />)}
-                        </datalist>
-                        <datalist id="category-suggestions">
-                            {predefinedCategories.map((category, index) => <option key={`cat-${index}`} value={category} />)}
-                        </datalist>
-                        <datalist id="company-suggestions">
-                            {predefinedCompanies.map((company, index) => <option key={`comp-${index}`} value={company} />)}
-                        </datalist>
+                        {/* Category */}
+                        <div className="mb-4">
+                            <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
+                                <List className="inline-block h-4 w-4 mr-1 text-gray-500" />Category
+                            </label>
+                            <input
+                                type="text"
+                                id="category"
+                                name="category"
+                                value={productForm.category}
+                                onChange={handleInputChange}
+                                placeholder="e.g., Tablet, Syrup, Injection"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                list="predefinedCategories"
+                            />
+                            <datalist id="predefinedCategories">
+                                {predefinedCategories.map((category, index) => (
+                                    <option key={index} value={category} />
+                                ))}
+                            </datalist>
+                        </div>
 
-                        <div className="flex flex-wrap gap-3 mt-6">
-                            <Button onClick={handleSaveProduct} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
-                                {editingProduct ? <Edit className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
-                                {editingProduct ? 'Update Product' : 'Save Product'}
-                            </Button>
-                            {editingProduct ? (
-                                <Button onClick={resetForm} className="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
-                                    <X className="mr-2 h-4 w-4" /> Cancel Edit
-                                </Button>
-                            ) : (
-                                <Button onClick={resetForm} className="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg shadow hover:shadow-md transition-all duration-150 font-semibold flex items-center text-sm">
-                                    <RefreshCcw className="mr-2 h-4 w-4" /> Clear Form
-                                </Button>
-                            )}
+                        {/* Company */}
+                        <div className="mb-4">
+                            <label htmlFor="company" className="block text-sm font-medium text-gray-700 mb-1">
+                                <Building2 className="inline-block h-4 w-4 mr-1 text-gray-500" />Company
+                            </label>
+                            <input
+                                type="text"
+                                id="company"
+                                name="company"
+                                value={productForm.company}
+                                onChange={handleInputChange}
+                                placeholder="e.g., Cipla, Sun Pharma"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                list="predefinedCompanies"
+                            />
+                            <datalist id="predefinedCompanies">
+                                {predefinedCompanies.map((company, index) => (
+                                    <option key={index} value={company} />
+                                ))}
+                            </datalist>
+                        </div>
+
+                        {/* Items per Pack */}
+                        <div className="mb-4">
+                            <label htmlFor="itemsPerPack" className="block text-sm font-medium text-gray-700 mb-1">
+                                <Boxes className="inline-block h-4 w-4 mr-1 text-gray-500" />Items per Pack
+                            </label>
+                            <input
+                                type="number"
+                                id="itemsPerPack"
+                                name="itemsPerPack"
+                                value={productForm.itemsPerPack}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 10 (for a strip of 10 tablets)"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                min="1"
+                            />
+                        </div>
+
+                        {/* Minimum Stock */}
+                        <div className="mb-4">
+                            <label htmlFor="minStock" className="block text-sm font-medium text-gray-700 mb-1">
+                                <ArrowDownCircle className="inline-block h-4 w-4 mr-1 text-gray-500" />Minimum Stock (Items)
+                            </label>
+                            <input
+                                type="number"
+                                id="minStock"
+                                name="minStock"
+                                value={productForm.minStock}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 50 (items)"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                min="0"
+                            />
+                             <p className="mt-1 text-xs text-gray-500">
+                                An alert will be triggered if stock falls below this.
+                            </p>
+                        </div>
+
+                        {/* Maximum Stock */}
+                        <div className="mb-4">
+                            <label htmlFor="maxStock" className="block text-sm font-medium text-gray-700 mb-1">
+                                <ArrowUpCircle className="inline-block h-4 w-4 mr-1 text-gray-500" />Maximum Stock (Items)
+                            </label>
+                            <input
+                                type="number"
+                                id="maxStock"
+                                name="maxStock"
+                                value={productForm.maxStock}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 500 (items)"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                min="0"
+                            />
+                             <p className="mt-1 text-xs text-gray-500">
+                                Helps in reordering and maintaining optimal inventory.
+                            </p>
+                        </div>
+
+                        {/* MRP */}
+                        <div className="mb-4">
+                            <label htmlFor="mrp" className="block text-sm font-medium text-gray-700 mb-1">
+                                <IndianRupee className="inline-block h-4 w-4 mr-1 text-gray-500" />MRP (Max. Retail Price) / Pack
+                            </label>
+                            <input
+                                type="number"
+                                id="mrp"
+                                name="mrp"
+                                value={productForm.mrp}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 99.99"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                step="0.01"
+                                min="0"
+                                aria-describedby="mrp-help"
+                            />
+                            <p id="mrp-help" className="mt-1 text-xs text-gray-500">
+                                The Maximum Retail Price of one pack/unit.
+                            </p>
+                        </div>
+
+                        {/* NEW: Sale Price input field */}
+                        <div className="mb-4">
+                            <label htmlFor="salePrice" className="block text-sm font-medium text-gray-700 mb-1">
+                                <IndianRupee className="inline-block h-4 w-4 mr-1 text-gray-500" />Sale Price / Pack
+                            </label>
+                            <input
+                                type="number"
+                                id="salePrice"
+                                name="salePrice"
+                                value={productForm.salePrice}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 89.99"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                step="0.01"
+                                min="0"
+                                aria-describedby="salePrice-help"
+                            />
+                            <p id="salePrice-help" className="mt-1 text-xs text-gray-500">
+                                The default selling price for one pack/unit. Leave empty if same as MRP.
+                            </p>
+                        </div>
+
+                        {/* Discount */}
+                        <div className="mb-4">
+                            <label htmlFor="discount" className="block text-sm font-medium text-gray-700 mb-1">
+                                <Percent className="inline-block h-4 w-4 mr-1 text-gray-500" />Discount (%)
+                            </label>
+                            <input
+                                type="number"
+                                id="discount"
+                                name="discount"
+                                value={productForm.discount}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 10 (for 10% discount)"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                            />
+                        </div>
+
+                        {/* Tax Rate */}
+                        <div className="mb-4">
+                            <label htmlFor="taxRate" className="block text-sm font-medium text-gray-700 mb-1">
+                                <Scale className="inline-block h-4 w-4 mr-1 text-gray-500" />Tax Rate (%)
+                            </label>
+                            <input
+                                type="number"
+                                id="taxRate"
+                                name="taxRate"
+                                value={productForm.taxRate}
+                                onChange={handleInputChange}
+                                placeholder="e.g., 18 (for 18% GST)"
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                            />
                         </div>
                     </div>
 
-                    {/* Product List Section */}
-                    <div className="bg-white p-6 rounded-xl shadow-xl">
-                        <div className="flex flex-wrap justify-between items-center mb-5 border-b border-gray-200 pb-4">
-                            <h2 className="text-2xl font-bold text-gray-700 flex items-center">
-                                <List className="mr-3 h-6 w-6 text-indigo-600" /> Product List
-                            </h2>
-                            <div className="relative mt-3 md:mt-0 w-full md:w-auto md:max-w-xs">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Search className="h-5 w-5 text-gray-400" />
-                                </div>
-                                <input
-                                    type="text"
-                                    placeholder="Search products..."
-                                    value={searchQuery}
-                                    onChange={(e) => {
-                                        setSearchQuery(e.target.value);
-                                        setCurrentPage(1); // Reset to first page on search
-                                    }}
-                                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
-                                />
-                            </div>
-                        </div>
+                    {/* Form Actions */}
+                    <div className="mt-6 flex justify-end space-x-3">
+                        <Button
+                            onClick={handleClearForm}
+                            className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+                        >
+                            <RefreshCcw className="mr-2 h-4 w-4" /> Clear Form
+                        </Button>
+                        <Button
+                            onClick={handleSaveProduct}
+                            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+                        >
+                            <Save className="mr-2 h-4 w-4" /> {editingProduct ? 'Update Product' : 'Add Product'}
+                        </Button>
+                    </div>
+                </div>
 
-                        <div className="overflow-x-auto rounded-lg border border-gray-200">
-                            <table className="min-w-full table-auto">
-                                <thead className="bg-gray-50">
-                                    <tr className="text-left text-xs sm:text-sm text-gray-600 uppercase tracking-wider">
-                                        <th className="px-4 py-3 font-semibold cursor-pointer" onClick={() => handleSort('name')}>
-                                            Name {getSortIcon('name')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold cursor-pointer" onClick={() => handleSort('unit')}>
-                                            Unit {getSortIcon('unit')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold hidden md:table-cell cursor-pointer" onClick={() => handleSort('category')}>
-                                            Category {getSortIcon('category')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold hidden lg:table-cell cursor-pointer" onClick={() => handleSort('company')}>
-                                            Company {getSortIcon('company')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold text-center cursor-pointer" onClick={() => handleSort('itemsPerPack')}>
-                                            Items/Pack {getSortIcon('itemsPerPack')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold text-right hidden sm:table-cell cursor-pointer" onClick={() => handleSort('mrp')}>
-                                            MRP {getSortIcon('mrp')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell cursor-pointer" onClick={() => handleSort('discount')}>
-                                            Disc % {getSortIcon('discount')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold text-center hidden lg:table-cell cursor-pointer" onClick={() => handleSort('taxRate')}>
-                                            Tax % {getSortIcon('taxRate')}
-                                        </th>
-                                        <th className="px-3 py-3 font-semibold text-right cursor-pointer" onClick={() => handleSort('quantity')}>
-                                            Stock {getSortIcon('quantity')}
-                                        </th>
-                                        <th className="px-4 py-3 font-semibold text-center">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200 bg-white">
-                                    {currentProducts.length > 0 ? (
-                                        currentProducts.map((product) => (
-                                            // Added fade-in-item class to table rows
-                                            <tr
-                                                key={product.id}
-                                                className={`hover:bg-slate-50 transition-colors duration-150 text-sm text-gray-700 fade-in-item
-                                                ${product.quantity <= product.minStock && product.minStock > 0 ? 'bg-red-50 text-red-700' : ''}
-                                                ${product.quantity >= product.maxStock && product.maxStock > 0 ? 'bg-amber-50 text-amber-700' : ''}
-                                                `}
-                                            >
-                                                <td className="px-4 py-3 font-medium whitespace-nowrap">{product.name}</td>
-                                                <td className="px-3 py-3 whitespace-nowrap">{product.unit}</td>
-                                                <td className="px-3 py-3 whitespace-nowrap hidden md:table-cell">{product.category || '-'}</td>
-                                                <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">{product.company || '-'}</td>
-                                                <td className="px-3 py-3 text-center whitespace-nowrap">{product.itemsPerPack}</td>
-                                               <td className="px-3 py-3 text-right whitespace-nowrap hidden sm:table-cell">₹{Number(product.mrp).toFixed(2)}</td>
-                                                <td className="px-3 py-3 text-center whitespace-nowrap hidden lg:table-cell">{product.discount}%</td>
-                                                <td className="px-3 py-3 text-center whitespace-nowrap hidden lg:table-cell">{product.taxRate}%</td>
-                                                <td className="px-3 py-3 text-right whitespace-nowrap font-medium">{product.quantity}</td>
-                                                <td className="px-4 py-3 text-center whitespace-nowrap">
-                                                    <div className="flex justify-center items-center space-x-2">
-                                                        <Button variant="outline" size="icon" onClick={() => handleEditProduct(product)} className="text-blue-600 hover:text-blue-800 hover:bg-blue-100 border-blue-300 hover:border-blue-500 p-1.5 rounded-md transition-all">
-                                                            <Edit className="h-4 w-4" />
-                                                        </Button>
-                                                        <Button variant="destructive" size="icon" onClick={() => handleDeleteProduct(product.id, product.name)} className="text-red-600 hover:text-red-800 hover:bg-red-100 border-red-300 hover:border-red-500 p-1.5 rounded-md transition-all">
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    ) : (
-                                        <tr>
-                                            <td colSpan="10" className="px-4 py-8 text-center text-gray-500"> {/* Adjusted colSpan */}
-                                                {searchQuery ? `No products found matching "${searchQuery}".` : "No products available. Add a new product to get started."}
+                {/* Product List */}
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-2xl font-semibold text-gray-700">Product List</h3>
+                        <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Search className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Search products..."
+                                value={searchQuery}
+                                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm w-full md:w-64"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('name')}
+                                    >
+                                        Product Name
+                                        {sortColumn === 'name' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('unit')}
+                                    >
+                                        Unit
+                                        {sortColumn === 'unit' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('category')}
+                                    >
+                                        Category
+                                        {sortColumn === 'category' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('company')}
+                                    >
+                                        Company
+                                        {sortColumn === 'company' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('itemsPerPack')}
+                                    >
+                                        Items/Pack
+                                        {sortColumn === 'itemsPerPack' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('quantity')}
+                                    >
+                                        Current Stock (Items)
+                                        {sortColumn === 'quantity' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('mrp')}
+                                    >
+                                        Current Master MRP/Pack
+                                        {sortColumn === 'mrp' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    {/* NEW: Sale Price table header */}
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('salePrice')}
+                                    >
+                                        Default Sale Price/Pack
+                                        {sortColumn === 'salePrice' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('discount')}
+                                    >
+                                        Discount (%)
+                                        {sortColumn === 'discount' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
+                                        onClick={() => handleSort('taxRate')}
+                                    >
+                                        Tax Rate (%)
+                                        {sortColumn === 'taxRate' && (
+                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
+                                        )}
+                                    </th>
+                                    <th scope="col" className="relative px-3 py-3">
+                                        <span className="sr-only">Actions</span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {currentFilteredAndSortedProducts.length > 0 ? (
+                                    currentFilteredAndSortedProducts.map((product) => (
+                                        <tr key={product.id} className="hover:bg-gray-100 transition duration-100 ease-in-out">
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{product.name}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.unit}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.category}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.company}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.itemsPerPack}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{product.quantity}</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(product.mrp).toFixed(2)}</td>
+                                            {/* NEW: Sale Price table data */}
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                                                {product.salePrice > 0 ? `₹${Number(product.salePrice).toFixed(2)}` : '-'}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{Number(product.discount).toFixed(2)}%</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{Number(product.taxRate).toFixed(2)}%</td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
+                                                <div className="flex items-center space-x-2">
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() => handleEditProduct(product)}
+                                                        className="p-2 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors duration-200"
+                                                        title="Edit Product"
+                                                    >
+                                                        <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() => handleDeleteProduct(product.id, product.name)}
+                                                        className="p-2 rounded-full bg-red-100 hover:bg-red-200 text-red-700 transition-colors duration-200"
+                                                        title="Delete Product"
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </td>
                                         </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Pagination Controls */}
-                        {currentFilteredAndSortedProducts.length > productsPerPage && (
-                            <nav className="flex justify-center items-center gap-2 pt-4" aria-label="Pagination">
-                                <Button
-                                    onClick={() => paginate(currentPage - 1)}
-                                    disabled={currentPage === 1}
-                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg"
-                                >
-                                    <ChevronLeft className="h-5 w-5" /> Previous
-                                </Button>
-                                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                                    <Button
-                                        key={page}
-                                        onClick={() => paginate(page)}
-                                        className={`px-4 py-2 rounded-lg ${currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
-                                    >
-                                        {page}
-                                    </Button>
-                                ))}
-                                <Button
-                                    onClick={() => paginate(currentPage + 1)}
-                                    disabled={currentPage === totalPages}
-                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg"
-                                >
-                                    Next <ChevronRight className="h-5 w-5" />
-                                </Button>
-                            </nav>
-                        )}
-
-                         {currentFilteredAndSortedProducts.length === 0 && products.length > 0 && searchQuery && (
-                            <p className="text-center text-gray-500 mt-4">No products match your current search query.</p>
-                        )}
-                        {currentFilteredAndSortedProducts.length === 0 && products.length > 0 && !searchQuery && (
-                            <p className="text-center text-gray-500 mt-4">No products available after filtering/sorting.</p>
-                        )}
+                                    ))
+                                ) : (
+                                    <tr>
+                                        <td colSpan="11" className="px-3 py-4 text-center text-sm text-gray-500">
+                                            {searchQuery ? "No products match your search." : "No products added yet."}
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
+
+                    {/* Pagination Controls */}
+                    <div className="mt-4 flex justify-between items-center">
+                        <Button
+                            onClick={() => paginate(currentPage - 1)}
+                            disabled={currentPage === 1}
+                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+                        </Button>
+                        <span className="text-sm text-gray-700">
+                            Page {currentPage} of {totalPages}
+                        </span>
+                        <Button
+                            onClick={() => paginate(currentPage + 1)}
+                            disabled={currentPage === totalPages || totalPages === 0}
+                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Next <ChevronRight className="h-4 w-4 ml-1" />
+                        </Button>
+                    </div>
+
+                    {currentFilteredAndSortedProducts.length === 0 && products.length > 0 && searchQuery && (
+                        <p className="text-center text-gray-500 mt-4">No products match your current search query.</p>
+                    )}
+                    {currentFilteredAndSortedProducts.length === 0 && products.length > 0 && !searchQuery && (
+                        <p className="text-center text-gray-500 mt-4">No products available after filtering/sorting.</p>
+                    )}
                 </div>
             </div>
              <style jsx>{`
