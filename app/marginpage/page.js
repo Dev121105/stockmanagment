@@ -1,3 +1,4 @@
+"use client";
 import React, { useState } from 'react';
 
 // Helper function to calculate profit and margin

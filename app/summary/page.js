@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"; // Import useMemo
 // Adjust path if needed - assuming TotalSummary is in the 'components' folder
-import TotalSummary from "../components/TotalSummary";
+import TotalSummary from "../pages/TotalSummary";
 import Header from "../components/Header";
 // Import toast for error messages
 import { toast } from 'sonner';
