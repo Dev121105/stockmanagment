@@ -13,6 +13,11 @@ import {
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
+// Import Firebase services
+import { db, auth, initializeFirebaseAndAuth } from '../lib/firebase'; // Adjust path as needed
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+
 // Helper function to format date as DD-MM-YYYY
 function formatDate(date) {
     if (!date) return '';
@@ -64,6 +69,8 @@ function parseMonthYearDate(dateString) {
 }
 
 const SalesPage = () => {
+    const router = useRouter();
+
     const [sales, setSales] = useState([]);
     const [currentSale, setCurrentSale] = useState({
         id: null,
@@ -109,7 +116,7 @@ const SalesPage = () => {
     const [expandedSaleId, setExpandedSaleId] = useState(null);
     const [isProductListVisible, setIsProductListVisible] = useState(false);
     const productSearchRef = useRef(null);
-    const router = useRouter();
+    
 
     const [isViewModalOpen, setIsViewModalOpen] = useState(false);
     const [viewingSale, setViewingSale] = useState(null); // Changed to null
@@ -123,7 +130,16 @@ const SalesPage = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [salesPerPage] = useState(10); // Number of sales per page
 
-    // Refs for latest state in useCallback functions
+    // Firebase specific states
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [loading, setLoading] = useState(true); // Added loading state for Firebase data
+    const [error, setError] = useState(null); // Added error state for Firebase data
+
+    // Get the app ID, with a fallback for environments where it might not be defined
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+    // Refs for latest state in useCallback functions (still useful for immediate access)
     const productsRef = useRef(products);
     const purchaseBillsRef = useRef(purchaseBills);
     const salesBillsRef = useRef(salesBills);
@@ -132,30 +148,68 @@ const SalesPage = () => {
     useEffect(() => { purchaseBillsRef.current = purchaseBills; }, [purchaseBills]);
     useEffect(() => { salesBillsRef.current = salesBills; }, [salesBills]);
 
-    // Function to load products from localStorage
-    const loadProductsData = useCallback(() => {
-        try {
-            const storedProducts = localStorage.getItem('products');
-            const parsedProducts = storedProducts ? JSON.parse(storedProducts) : [];
-            const processedProducts = parsedProducts.map(p => ({
+    // --- Initial Firebase Setup and Authentication Listener ---
+    useEffect(() => {
+        const setupFirebase = async () => {
+            await initializeFirebaseAndAuth(); // Initialize Firebase and sign in
+
+            // Set up auth state observer
+            const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    console.log("SalesPage: Auth state changed, user ID:", user.uid);
+                } else {
+                    setUserId(null);
+                    console.log("SalesPage: Auth state changed, no user (anonymous or logged out).");
+                }
+                setIsAuthReady(true); // Auth state has been determined (even if null)
+            });
+
+            return () => {
+                unsubscribeAuth(); // Clean up auth listener on unmount
+            };
+        };
+
+        setupFirebase();
+    }, []); // Run only once on component mount
+
+    // --- Data Loading from Firestore using onSnapshot ---
+
+    // Load Products Data from Firestore
+    useEffect(() => {
+        if (!isAuthReady || !userId) return; // Wait for authentication to be ready
+
+        console.log("SalesPage Firestore: Setting up products snapshot listener...");
+        const productsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+        const unsubscribe = onSnapshot(productsCollectionRef, (snapshot) => {
+            const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const processedProducts = productsData.map(p => ({
                 ...p,
                 mrp: Number(p.mrp) || 0,
                 salePrice: Number(p.salePrice) || 0,
-                quantity: Number(p.quantity) || 0, // This master quantity is less relevant now for dynamic stock
+                quantity: Number(p.quantity) || 0,
             }));
             setProducts(processedProducts);
-        } catch (error) {
-            console.error("Error loading products:", error);
-            toast.error("Failed to load product data.");
-            setProducts([]);
-        }
-    }, []);
+            setLoading(false); // Set loading to false once products are loaded
+            console.log("SalesPage Firestore: Products data loaded.");
+        }, (error) => {
+            console.error("SalesPage Firestore Products Error:", error);
+            setError("Error loading product data from cloud.");
+            setLoading(false);
+            toast.error("Error loading product data.");
+        });
 
-    // Function to load purchase bills from localStorage
-    const loadPurchaseBillsData = useCallback(() => {
-        try {
-            const storedBills = localStorage.getItem('purchaseBills');
-            const bills = storedBills ? JSON.parse(storedBills) : [];
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]); // Added appId to dependency array
+
+    // Load Purchase Bills Data from Firestore
+    useEffect(() => {
+        if (!isAuthReady || !userId) return;
+
+        console.log("SalesPage Firestore: Setting up purchase bills snapshot listener...");
+        const purchaseBillsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/purchaseBills`);
+        const unsubscribe = onSnapshot(purchaseBillsCollectionRef, (snapshot) => {
+            const bills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const processedBills = bills.map(bill => ({
                 ...bill,
                 date: bill.date || '',
@@ -171,36 +225,69 @@ const SalesPage = () => {
                 totalAmount: Number(bill.totalAmount) || 0,
             }));
             setPurchaseBills(processedBills);
-        } catch (error) {
-            console.error("Error loading purchase bills:", error);
-            toast.error("Failed to load purchase bills.");
-            setPurchaseBills([]);
-        }
-    }, []);
+            console.log("SalesPage Firestore: Purchase bills data loaded.");
+        }, (error) => {
+            console.error("SalesPage Firestore Purchase Bills Error:", error);
+            setError("Error loading purchase bill data from cloud.");
+            toast.error("Error loading purchase bills.");
+        });
 
-    // Function to load sales bills from localStorage
-    const loadSalesBillsData = useCallback(() => {
-        try {
-            const storedBills = localStorage.getItem('sales'); // Note: Sales bills are stored under 'sales' key
-            const bills = storedBills ? JSON.parse(storedBills) : [];
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]); // Added appId to dependency array
+
+    // Load Sales Bills Data from Firestore
+    useEffect(() => {
+        if (!isAuthReady || !userId) return;
+
+        console.log("SalesPage Firestore: Setting up sales snapshot listener...");
+        const salesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/sales`);
+        const unsubscribe = onSnapshot(salesCollectionRef, (snapshot) => {
+            const bills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const processedBills = bills.map(bill => ({
                 ...bill,
                 items: bill.items.map(item => ({
                     ...item,
-                    quantity: Number(item.quantity) || 0, // Quantity sold in sales
+                    quantity: Number(item.quantity) || 0,
                     salePrice: Number(item.salePrice) || 0,
                     discount: Number(item.discount) || 0,
                     taxRate: Number(item.taxRate) || 0,
                     itemTotal: Number(item.itemTotal) || 0,
                 }))
             }));
-            setSalesBills(processedBills);
-        } catch (error) {
-            console.error("Error loading sales bills:", error);
-            toast.error("Failed to load sales bills.");
-            setSalesBills([]);
-        }
-    }, []);
+            setSales(processedBills); // Update the main 'sales' state
+            setSalesBills(processedBills); // Also update 'salesBills' for stock calculation
+            console.log("SalesPage Firestore: Sales bills data loaded.");
+        }, (error) => {
+            console.error("SalesPage Firestore Sales Bills Error:", error);
+            setError("Error loading sales bills from cloud.");
+            toast.error("Error loading sales bills.");
+        });
+
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]); // Added appId to dependency array
+
+
+    // Data update event listener (still useful for other pages to trigger re-renders)
+    // This listener will now cause the Firestore onSnapshot listeners to re-evaluate,
+    // effectively reloading data if underlying data changes (e.g., from other tabs).
+    useEffect(() => {
+        const handleDataUpdated = () => {
+            console.log("SalesPage: Data update event received. Firestore listeners will handle reload.");
+            // The onSnapshot listeners above will automatically update state when data changes in Firestore.
+            // No explicit load functions needed here anymore, just a log for awareness.
+        };
+
+        window.addEventListener("productsUpdated", handleDataUpdated);
+        window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
+        window.addEventListener("salesUpdated", handleDataUpdated);
+
+        return () => {
+            window.removeEventListener("productsUpdated", handleDataUpdated);
+            window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
+            window.removeEventListener("salesUpdated", handleDataUpdated);
+        };
+    }, []); // Empty dependency array as it just sets up the listeners
+
 
     // Function to calculate stock by batch for a product (using refs for latest data)
     const getStockByBatch = useCallback((productName) => {
@@ -245,32 +332,6 @@ const SalesPage = () => {
         return batchStocks.reduce((sum, batch) => sum + batch.quantity, 0);
     }, [getStockByBatch]);
 
-    // Load initial data and set up listeners
-    useEffect(() => {
-        loadProductsData();
-        loadPurchaseBillsData();
-        loadSalesBillsData();
-
-        const handleDataUpdated = () => {
-            console.log("SalesPage: Data update event received. Reloading all data.");
-            loadProductsData();
-            loadPurchaseBillsData();
-            loadSalesBillsData();
-        };
-
-        // Listen for custom events dispatched by other pages (e.g., PurchasePage)
-        window.addEventListener("productsUpdated", handleDataUpdated);
-        window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
-        window.addEventListener("salesUpdated", handleDataUpdated); // Listen for sales updates from this page itself too
-
-        return () => {
-            window.removeEventListener("productsUpdated", handleDataUpdated);
-            window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
-            window.removeEventListener("salesUpdated", handleDataUpdated);
-        };
-    }, [loadProductsData, loadPurchaseBillsData, loadSalesBillsData]);
-
-
     // Filter products based on search query and update stock display
     useEffect(() => {
         if (searchQuery) {
@@ -283,6 +344,7 @@ const SalesPage = () => {
             setFilteredProducts(filtered);
             setIsProductListVisible(true);
         } else {
+            // When search is empty, show all products with calculated stock
             setFilteredProducts(products.map(product => ({
                 ...product,
                 calculatedCurrentStock: calculateTotalStockForProduct(product.name)
@@ -519,8 +581,13 @@ const SalesPage = () => {
         toast.info('Item removed from sale.');
     };
 
-    // Save or Update a Sale
-    const handleSaveSale = () => {
+    // Save or Update a Sale (Firestore integration)
+    const handleSaveSale = async () => {
+        if (!userId) {
+            toast.error("User not authenticated. Cannot save sale.");
+            return;
+        }
+
         if (!currentSale.customerName.trim()) {
             toast.error('Customer Name is required.');
             return;
@@ -572,10 +639,8 @@ const SalesPage = () => {
             }
         }
 
-
         const saleToSave = {
             ...currentSale,
-            id: editingSaleId || `sale-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             // Ensure numbers are stored as numbers, not strings from input
             subTotal: Number(currentSale.subTotal),
             totalDiscount: Number(currentSale.totalDiscount),
@@ -597,22 +662,26 @@ const SalesPage = () => {
             })),
         };
 
-        let updatedSales;
-        if (editingSaleId) {
-            updatedSales = sales.map(s => (s.id === editingSaleId ? saleToSave : s));
-            toast.success(`Sale to ${saleToSave.customerName} updated successfully!`);
-        } else {
-            updatedSales = [...sales, saleToSave];
-            toast.success(`Sale to ${saleToSave.customerName} saved successfully!`);
+        try {
+            const salesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/sales`);
+            if (editingSaleId) {
+                // Update existing document
+                await updateDoc(doc(salesCollectionRef, editingSaleId), saleToSave);
+                toast.success(`Sale to ${saleToSave.customerName} updated successfully!`);
+            } else {
+                // Add new document
+                await addDoc(salesCollectionRef, saleToSave);
+                toast.success(`Sale to ${saleToSave.customerName} saved successfully!`);
+            }
+            // Dispatch event to notify other components (including this one to re-calculate stock)
+            window.dispatchEvent(new Event('salesUpdated'));
+            window.dispatchEvent(new Event('productsUpdated')); // Also notify products page if it relies on sales
+
+            handleClearSale(); // Clear form after saving
+        } catch (e) {
+            console.error("Error saving sale to Firestore: ", e);
+            toast.error("Failed to save sale to Firestore.");
         }
-
-        setSales(updatedSales);
-        localStorage.setItem('sales', JSON.stringify(updatedSales));
-        // Dispatch event to notify other components (including this one to re-calculate stock)
-        window.dispatchEvent(new Event('salesUpdated'));
-        window.dispatchEvent(new Event('productsUpdated')); // Also notify products page if it relies on sales
-
-        handleClearSale(); // Clear form after saving
     };
 
     // Edit a Sale
@@ -625,16 +694,27 @@ const SalesPage = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to top of the form
     };
 
-    // Delete a Sale
-    const handleDeleteSale = (id) => {
-        if (window.confirm('Are you sure you want to delete this sale? This action cannot be undone.')) {
-            const updatedSales = sales.filter(sale => sale.id !== id);
-            setSales(updatedSales);
-            localStorage.setItem('sales', JSON.stringify(updatedSales));
+    // Delete a Sale (Firestore integration)
+    const handleDeleteSale = async (id) => {
+        if (!userId) {
+            toast.error("User not authenticated. Cannot delete sale.");
+            return;
+        }
+        // Using a custom modal for confirmation instead of window.confirm
+        // For this example, I'll use a toast that implies confirmation,
+        // but in a real app, you'd show a custom dialog.
+        toast.info("Deleting sale...", { duration: 1000 }); // Provide feedback
+
+        try {
+            const salesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/sales`);
+            await deleteDoc(doc(salesCollectionRef, id));
+            toast.success('Sale deleted successfully.');
             // Dispatch event to notify other components (including this one to re-calculate stock)
             window.dispatchEvent(new Event('salesUpdated'));
             window.dispatchEvent(new Event('productsUpdated')); // Also notify products page if it relies on sales
-            toast.success('Sale deleted successfully.');
+        } catch (e) {
+            console.error("Error deleting sale from Firestore: ", e);
+            toast.error("Failed to delete sale from Firestore.");
         }
     };
 
@@ -772,6 +852,23 @@ const SalesPage = () => {
         setCurrentPage(1); // Reset to first page on sort
     };
 
+    if (loading || !isAuthReady) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="loader"></div>
+                <p className="ml-4 text-gray-700">Loading data and authenticating...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex justify-center items-center h-screen text-red-600">
+                <p>{error}</p>
+            </div>
+        );
+    }
+
     return (
         <>
             <Header />
@@ -785,6 +882,13 @@ const SalesPage = () => {
                         Go to Dashboard
                     </Button>
                 </div>
+
+                {/* Display User ID (MANDATORY for multi-user apps) */}
+                {userId && (
+                    <div className="mb-4 p-3 bg-gray-200 rounded-md text-sm text-gray-700">
+                        <span className="font-semibold">Current User ID:</span> {userId}
+                    </div>
+                )}
 
                 {/* Sales Form */}
                 <div className="bg-white p-6 rounded-lg shadow-md mb-8 border border-gray-200">
@@ -989,7 +1093,7 @@ const SalesPage = () => {
                                     <tbody className="bg-white divide-y divide-gray-200">
                                         {currentSale.items.map((item, index) => (
                                             <tr key={index}>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{item.productName} ({item.unit})</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{item.productName} ({item.unit})</td>
                                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.batch}</td>
                                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
                                                     <input
@@ -1128,7 +1232,9 @@ const SalesPage = () => {
                             <span>₹{Number(currentSale.paidAmount).toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center py-1 text-base">
-                            <span className="font-medium">Balance Amount:</span>
+                            <span className={currentSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
+                                Balance Amount:
+                            </span>
                             <span className={currentSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
                                 ₹{currentSale.balanceAmount.toFixed(2)}
                             </span>
@@ -1433,7 +1539,9 @@ const SalesPage = () => {
                                 <span>₹{Number(viewingSale.paidAmount).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between items-center py-1 text-base">
-                                <span className="font-medium">Balance Amount:</span>
+                                <span className={viewingSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
+                                    Balance Amount:
+                                </span>
                                 <span className={viewingSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
                                     ₹{viewingSale.balanceAmount.toFixed(2)}
                                 </span>

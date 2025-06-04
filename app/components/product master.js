@@ -30,6 +30,11 @@ import {
     RefreshCcw // Icon for Clear Form
 } from 'lucide-react';
 
+// Import Firebase services
+import { db, auth, initializeFirebaseAndAuth } from '../lib/firebase'; // Adjust path as needed
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+
 const ProductMasterPage = () => {
     // Log component render
     console.log("ProductMasterPage: Component Rendering...");
@@ -60,6 +65,16 @@ const ProductMasterPage = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [productsPerPage] = useState(10); // Number of products per page
 
+    // Firebase specific states
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [loading, setLoading] = useState(true); // Added loading state for Firebase data
+    const [error, setError] = useState(null); // Added error state for Firebase data
+
+    // Get the app ID, with a fallback for environments where it might not be defined
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+
     const predefinedUnits = [
         'Pcs', 'Bottle', 'Strip', 'Box', 'Tube', 'Gm', 'Kg', 'Ml', 'Liter',
         'Capsule', 'Tablet', 'Pack', 'Each', 'Vial', 'Ampoule', 'Can',
@@ -81,91 +96,75 @@ const ProductMasterPage = () => {
 
     const router = useRouter();
 
-    // Load products from localStorage on component mount
+    // --- Initial Firebase Setup and Authentication Listener ---
     useEffect(() => {
-        console.log("ProductMasterPage useEffect: Loading products from localStorage...");
-        const storedProducts = localStorage.getItem('products');
-        if (storedProducts) {
-            try {
-                const parsedProducts = JSON.parse(storedProducts);
-                const productsWithFormattedData = parsedProducts.map(product => ({
-                    ...product,
-                    itemsPerPack: Number(product.itemsPerPack) || 1,
-                    minStock: Number(product.minStock) || 0,
-                    maxStock: Number(product.maxStock) || 0,
-                    mrp: Number(product.mrp) || 0,
-                    salePrice: Number(product.salePrice) || 0, // NEW: Parse salePrice
-                    discount: Number(product.discount) || 0,
-                    taxRate: Number(product.taxRate) || 0,
-                    quantity: Number(product.quantity) || 0, // Ensure quantity is a number
-                    // Remove transient or irrelevant fields if they somehow got saved
-                    hsn: undefined,
-                    schedule: undefined,
-                    barcode: undefined,
-                    batch: undefined, // Batch/Expiry are per purchase/sale, not master
-                    expiry: undefined,
-                })).filter(product => product.name); // Filter out any entries without a name
+        const setupFirebase = async () => {
+            await initializeFirebaseAndAuth(); // Initialize Firebase and sign in
 
-                console.log(`ProductMasterPage useEffect: Loaded and parsed ${productsWithFormattedData.length} products.`);
-                setProducts(productsWithFormattedData);
-            } catch (error) {
-                console.error("ProductMasterPage useEffect: Error loading products from localStorage:", error);
-                setProducts([]);
-                toast.error("Error loading product data. Local storage might be corrupted.");
-            }
-        } else {
-            console.log("ProductMasterPage useEffect: No products found in localStorage.");
-            setProducts([]);
-        }
+            // Set up auth state observer
+            const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    console.log("ProductMasterPage: Auth state changed, user ID:", user.uid);
+                } else {
+                    setUserId(null);
+                    console.log("ProductMasterPage: Auth state changed, no user (anonymous or logged out).");
+                }
+                setIsAuthReady(true); // Auth state has been determined (even if null)
+            });
 
-         // Add event listener for product updates from other pages (e.g., Sales, Purchase)
-         const handleProductsUpdated = () => {
-              console.log("ProductMasterPage: 'productsUpdated' event received. Reloading products.");
-              const updatedStoredProducts = localStorage.getItem('products');
-              if (updatedStoredProducts) {
-                  try {
-                       const parsedProducts = JSON.parse(updatedStoredProducts);
-                       const productsWithFormattedData = parsedProducts.map(product => ({
-                           ...product,
-                           itemsPerPack: Number(product.itemsPerPack) || 1,
-                           minStock: Number(product.minStock) || 0,
-                           maxStock: Number(product.maxStock) || 0,
-                           mrp: Number(product.mrp) || 0,
-                           salePrice: Number(product.salePrice) || 0, // NEW: Parse salePrice on update
-                           discount: Number(product.discount) || 0,
-                           taxRate: Number(product.taxRate) || 0,
-                           quantity: Number(product.quantity) || 0,
-                           hsn: undefined, schedule: undefined, barcode: undefined, batch: undefined, expiry: undefined,
-                       })).filter(product => product.name);
-                       setProducts(productsWithFormattedData);
-                       console.log(`ProductMasterPage: Reloaded ${productsWithFormattedData.length} products after update event.`);
-                  } catch (error) {
-                       console.error("ProductMasterPage: Error reloading products after update event:", error);
-                       toast.error("Error reloading product data after update.");
-                  }
-              } else {
-                   setProducts([]);
-                   console.log("ProductMasterPage: No products found after update event.");
-              }
-         };
+            return () => {
+                unsubscribeAuth(); // Clean up auth listener on unmount
+            };
+        };
 
-         window.addEventListener('productsUpdated', handleProductsUpdated);
+        setupFirebase();
+    }, []); // Run only once on component mount
 
-         // Clean up event listener
-         return () => {
-              console.log("ProductMasterPage useEffect: Cleaning up 'productsUpdated' event listener.");
-              window.removeEventListener('productsUpdated', handleProductsUpdated);
-         };
 
-    }, []); // Empty dependency array ensures this runs only once on mount
+    // Load products from Firestore on component mount and listen for real-time updates
+    useEffect(() => {
+        if (!isAuthReady || !userId) return; // Wait for authentication to be ready
+
+        console.log("ProductMasterPage Firestore: Setting up products snapshot listener...");
+        // Use __app_id and userId for collection path
+        const productsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+        const unsubscribe = onSnapshot(productsCollectionRef, (snapshot) => {
+            const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const processedProducts = productsData.map(product => ({
+                ...product,
+                itemsPerPack: Number(product.itemsPerPack) || 1,
+                minStock: Number(product.minStock) || 0,
+                maxStock: Number(product.maxStock) || 0,
+                mrp: Number(product.mrp) || 0,
+                salePrice: Number(product.salePrice) || 0,
+                discount: Number(product.discount) || 0,
+                taxRate: Number(product.taxRate) || 0,
+                quantity: Number(product.quantity) || 0, // Ensure quantity is a number
+            })).filter(product => product.name); // Filter out any entries without a name
+
+            setProducts(processedProducts);
+            setLoading(false); // Set loading to false once products are loaded
+            console.log(`ProductMasterPage Firestore: Loaded and parsed ${processedProducts.length} products.`);
+        }, (error) => {
+            console.error("ProductMasterPage Firestore Error:", error);
+            setError("Error loading product data from cloud.");
+            setLoading(false);
+            toast.error("Error loading product data.");
+        });
+
+        // Clean up listener on component unmount
+        return () => {
+            console.log("ProductMasterPage Firestore: Cleaning up products snapshot listener.");
+            unsubscribe();
+        };
+    }, [isAuthReady, userId, appId]); // Re-run if auth state or user or appId changes
+
 
     // Handle form input changes - Added more detailed logging
     const handleInputChange = (e) => {
-        // e.persist(); // Potentially helps with synthetic event pooling issues, less common in modern React
         const { name, value } = e.target;
         console.log(`handleInputChange: Event received for name="${name}" with value="${value}"`);
-        // console.log("handleInputChange: Event object:", e); // Log the entire event object - Can be noisy
-        // console.log("handleInputChange: Event target:", e.target); // Log the event target element - Can be noisy
 
         setProductForm(prevForm => {
             console.log(`handleInputChange: Updating state for "${name}" from "${prevForm[name]}" to "${value}"`);
@@ -178,7 +177,7 @@ const ProductMasterPage = () => {
     // Validate form data
     const validateForm = () => {
         console.log("Validating form:", productForm);
-        const { name, unit, itemsPerPack, mrp, salePrice, taxRate, discount, minStock, maxStock } = productForm; // NEW: Added salePrice
+        const { name, unit, itemsPerPack, mrp, salePrice, taxRate, discount, minStock, maxStock } = productForm;
 
         if (!name.trim()) {
             toast.error('Product Name is required.'); console.log("Validation failed: Name empty."); return false;
@@ -237,16 +236,19 @@ const ProductMasterPage = () => {
         return true;
     };
 
-    // Handle adding or updating a product
-    const handleSaveProduct = () => {
+    // Handle adding or updating a product (Firestore integration)
+    const handleSaveProduct = async () => {
         console.log("Attempting to save product...");
+        if (!userId) {
+            toast.error("User not authenticated. Cannot save product.");
+            return;
+        }
         if (!validateForm()) {
             console.log("Validation failed, save aborted.");
             return;
         }
 
         const productData = {
-            id: editingProduct ? editingProduct.id : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             name: productForm.name.trim(),
             unit: productForm.unit.trim(),
             category: productForm.category.trim(),
@@ -255,71 +257,69 @@ const ProductMasterPage = () => {
             minStock: Number(productForm.minStock) || 0,
             maxStock: Number(productForm.maxStock) || 0,
             mrp: Number(productForm.mrp),
-            salePrice: Number(productForm.salePrice) || 0, // NEW: Save salePrice
+            salePrice: Number(productForm.salePrice) || 0,
             discount: Number(productForm.discount) || 0,
             taxRate: Number(productForm.taxRate) || 0,
-            // Preserve existing quantity if editing, otherwise start at 0
+            // Quantity is managed dynamically based on purchases/sales, not directly in master
             quantity: editingProduct ? (Number(editingProduct.quantity) || 0) : 0,
         };
 
-        let updatedProducts;
-        if (editingProduct) {
-            console.log("Editing existing product:", editingProduct.id);
-            const nameConflict = products.some(p =>
-                p.name.toLowerCase() === productData.name.toLowerCase() && p.id !== productData.id
-            );
-            if (nameConflict) {
-                toast.error(`Another product with the name "${productData.name}" already exists.`);
-                console.log("Name conflict during edit.");
-                return;
-            }
-            updatedProducts = products.map(p =>
-                p.id === productData.id ? { ...productData, quantity: p.quantity } : p
-            );
-            toast.success(`Product "${productData.name}" updated successfully!`);
-            console.log("Product updated:", productData);
-        } else {
-            console.log("Adding new product.");
-            if (products.some(p => p.name.toLowerCase() === productData.name.toLowerCase())) {
-                toast.error(`Product with name "${productData.name}" already exists.`);
-                console.log("Name conflict during add.");
-                return;
-            }
-            updatedProducts = [...products, productData];
-            toast.success(`Product "${productData.name}" added successfully!`);
-            console.log("New product added:", productData);
-        }
-
-        setProducts(updatedProducts);
         try {
-            localStorage.setItem('products', JSON.stringify(updatedProducts));
-            console.log("Products saved to localStorage.");
-             // Dispatch event to notify other components that products data has changed
+            const productsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+            if (editingProduct) {
+                console.log("Editing existing product:", editingProduct.id);
+                const nameConflict = products.some(p =>
+                    p.name.toLowerCase() === productData.name.toLowerCase() && p.id !== editingProduct.id
+                );
+                if (nameConflict) {
+                    toast.error(`Another product with the name "${productData.name}" already exists.`);
+                    console.log("Name conflict during edit.");
+                    return;
+                }
+                await updateDoc(doc(productsCollectionRef, editingProduct.id), productData);
+                toast.success(`Product "${productData.name}" updated successfully!`);
+                console.log("Product updated in Firestore:", productData);
+            } else {
+                console.log("Adding new product.");
+                if (products.some(p => p.name.toLowerCase() === productData.name.toLowerCase())) {
+                    toast.error(`Product with name "${productData.name}" already exists.`);
+                    console.log("Name conflict during add.");
+                    return;
+                }
+                await addDoc(productsCollectionRef, productData);
+                toast.success(`Product "${productData.name}" added successfully!`);
+                console.log("New product added to Firestore:", productData);
+            }
+            // Dispatch event to notify other components that products data has changed
             window.dispatchEvent(new Event('productsUpdated'));
             console.log("'productsUpdated' event dispatched.");
         } catch (error) {
-            console.error("Error saving products to localStorage:", error);
-            toast.error("Failed to save product data.");
+            console.error("Error saving product to Firestore:", error);
+            toast.error("Failed to save product data to cloud.");
         }
 
         handleClearForm(); // Clear the form after saving
     };
 
-    // Handle deleting a product
-    const handleDeleteProduct = (id, name) => {
+    // Handle deleting a product (Firestore integration)
+    const handleDeleteProduct = async (id, name) => {
         console.log(`Attempting to delete product with ID: ${id}, Name: ${name}`);
-        if (window.confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
-            const updatedProducts = products.filter(p => p.id !== id);
-            setProducts(updatedProducts);
-            try {
-                localStorage.setItem('products', JSON.stringify(updatedProducts));
-                console.log("Product deleted and products saved to localStorage.");
-                window.dispatchEvent(new Event('productsUpdated'));
-                toast.success(`Product "${name}" deleted successfully.`);
-            } catch (error) {
-                console.error("Error deleting product from localStorage:", error);
-                toast.error("Failed to delete product.");
-            }
+        if (!userId) {
+            toast.error("User not authenticated. Cannot delete product.");
+            return;
+        }
+
+        // Using a toast for confirmation instead of window.confirm
+        toast.info(`Deleting "${name}"...`, { duration: 1000 }); // Provide immediate feedback
+
+        try {
+            const productsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+            await deleteDoc(doc(productsCollectionRef, id));
+            toast.success(`Product "${name}" deleted successfully.`);
+            window.dispatchEvent(new Event('productsUpdated'));
+        } catch (error) {
+            console.error("Error deleting product from Firestore:", error);
+            toast.error("Failed to delete product from cloud.");
         }
     };
 
@@ -336,7 +336,7 @@ const ProductMasterPage = () => {
             minStock: product.minStock,
             maxStock: product.maxStock,
             mrp: product.mrp,
-            salePrice: product.salePrice, // NEW: Load salePrice for editing
+            salePrice: product.salePrice, // Load salePrice for editing
             discount: product.discount,
             taxRate: product.taxRate,
         });
@@ -355,7 +355,7 @@ const ProductMasterPage = () => {
             minStock: '',
             maxStock: '',
             mrp: '',
-            salePrice: '', // NEW: Clear salePrice
+            salePrice: '', // Clear salePrice
             discount: '',
             taxRate: '',
         });
@@ -414,6 +414,24 @@ const ProductMasterPage = () => {
         }
     };
 
+    // Display loading or error message
+    if (loading || !isAuthReady) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="loader"></div>
+                <p className="ml-4 text-gray-700">Loading data and authenticating...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex justify-center items-center h-screen text-red-600">
+                <p>{error}</p>
+            </div>
+        );
+    }
+
     return (
         <>
             <Header />
@@ -427,6 +445,13 @@ const ProductMasterPage = () => {
                         Go to Dashboard
                     </Button>
                 </div>
+
+                {/* Display User ID (MANDATORY for multi-user apps) */}
+                {userId && (
+                    <div className="mb-4 p-3 bg-gray-200 rounded-md text-sm text-gray-700">
+                        <span className="font-semibold">Current User ID:</span> {userId}
+                    </div>
+                )}
 
                 {/* Product Form */}
                 <div className="bg-white p-6 rounded-lg shadow-md mb-8 border border-gray-200">
@@ -896,6 +921,20 @@ const ProductMasterPage = () => {
                 @keyframes fadeInItem {
                     0% { opacity: 0; transform: translateY(10px); }
                     100% { opacity: 1; transform: translateY(0); }
+                }
+                /* Loader styles */
+                .loader {
+                    border: 4px solid #f3f3f3; /* Light grey */
+                    border-top: 4px solid #3498db; /* Blue */
+                    border-radius: 50%;
+                    width: 40px;
+                    height: 40px;
+                    animation: spin 1s linear infinite;
+                }
+
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
                 }
             `}</style>
         </>

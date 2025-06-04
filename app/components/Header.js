@@ -2,6 +2,7 @@
 'use client';
 import React from 'react';
 import Link from 'next/link';
+import LogoutButton from './LogoutButton'; // Import the LogoutButton component
 
 const Header = () => {
     return (
@@ -60,7 +61,8 @@ const Header = () => {
                     >
                         Purchase
                     </Link>
-                    {/* You can add more navigation links here with the same animation classes */}
+                    {/* Logout Button added here */}
+                    <LogoutButton />
                 </nav>
             </div>
         </header>

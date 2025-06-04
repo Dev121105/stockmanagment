@@ -10,6 +10,11 @@ import { Plus, Trash2, Eye, Edit, Save, Search, RefreshCcw, Printer, Share2, X, 
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
+// Import Firebase services
+import { db, auth, initializeFirebaseAndAuth } from '../lib/firebase'; // Adjust path as needed
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+
 // Helper function to format date as DD-MM-YYYY
 function formatDate(date) {
     if (!date) return '';
@@ -94,9 +99,15 @@ const PurchasePage = () => {
     const [isEditingBill, setIsEditingBill] = useState(false);
     const [editBillId, setEditBillId] = useState(null);
 
-    const [purchaseBillsLoading, setPurchaseBillsLoading] = useState(true);
-    const [productsLoading, setProductsLoading] = useState(true);
-    const [salesBillsLoading, setSalesBillsLoading] = useState(true);
+    // Firebase specific states
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [loading, setLoading] = useState(true); // Combined loading state
+    const [error, setError] = useState(null); // Error state
+
+    // Get the app ID, with a fallback for environments where it might not be defined
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
 
     const productsRef = useRef(products); // Ref to current products state for stock calculation
     const purchaseBillsRef = useRef(purchaseBills);
@@ -114,36 +125,71 @@ const PurchasePage = () => {
         salesBillsRef.current = salesBills;
     }, [salesBills]);
 
-    // --- Data Loading Functions ---
-    const loadProductsData = useCallback(() => {
-        setProductsLoading(true);
-        try {
-            const storedProducts = localStorage.getItem('products');
-            const parsedProducts = storedProducts ? JSON.parse(storedProducts) : [];
-            const processedProducts = parsedProducts.map(p => ({
+    // --- Initial Firebase Setup and Authentication Listener ---
+    useEffect(() => {
+        const setupFirebase = async () => {
+            await initializeFirebaseAndAuth(); // Initialize Firebase and sign in
+
+            // Set up auth state observer
+            const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    console.log("PurchasePage: Auth state changed, user ID:", user.uid);
+                } else {
+                    setUserId(null);
+                    console.log("PurchasePage: Auth state changed, no user (anonymous or logged out).");
+                }
+                setIsAuthReady(true); // Auth state has been determined (even if null)
+            });
+
+            return () => {
+                unsubscribeAuth(); // Clean up auth listener on unmount
+            };
+        };
+
+        setupFirebase();
+    }, []); // Run only once on component mount
+
+    // --- Data Loading from Firestore using onSnapshot ---
+
+    // Load Products Data from Firestore
+    useEffect(() => {
+        if (!isAuthReady || !userId) return; // Wait for authentication to be ready
+
+        console.log("PurchasePage Firestore: Setting up products snapshot listener...");
+        const productsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+        const unsubscribe = onSnapshot(productsCollectionRef, (snapshot) => {
+            const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const processedProducts = productsData.map(p => ({
                 ...p,
                 mrp: Number(p.mrp) || 0,
-                originalMrp: Number(p.originalMrp) || 0, // Ensure originalMrp is number
+                originalMrp: Number(p.originalMrp) || 0,
                 itemsPerPack: Number(p.itemsPerPack) || 1,
                 minStock: Number(p.minStock) || 0,
                 maxStock: Number(p.maxStock) || 0,
                 discount: Number(p.discount) || 0,
             }));
             setProducts(processedProducts);
-        } catch (error) {
-            console.error("Error loading products:", error);
-            toast.error("Failed to load product data.");
-            setProducts([]);
-        } finally {
-            setProductsLoading(false);
-        }
-    }, []);
+            setLoading(false); // Set loading to false once products are loaded
+            console.log("PurchasePage Firestore: Products data loaded.");
+        }, (error) => {
+            console.error("PurchasePage Firestore Products Error:", error);
+            setError("Error loading product data from cloud.");
+            setLoading(false);
+            toast.error("Error loading product data.");
+        });
 
-    const loadPurchaseBillsData = useCallback(() => {
-        setPurchaseBillsLoading(true);
-        try {
-            const storedBills = localStorage.getItem('purchaseBills');
-            const bills = storedBills ? JSON.parse(storedBills) : [];
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]);
+
+    // Load Purchase Bills Data from Firestore
+    useEffect(() => {
+        if (!isAuthReady || !userId) return;
+
+        console.log("PurchasePage Firestore: Setting up purchase bills snapshot listener...");
+        const purchaseBillsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/purchaseBills`);
+        const unsubscribe = onSnapshot(purchaseBillsCollectionRef, (snapshot) => {
+            const bills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const processedBills = bills.map(bill => ({
                 ...bill,
                 date: bill.date || '',
@@ -154,7 +200,7 @@ const PurchasePage = () => {
                     itemsPerPack: Number(item.itemsPerPack) || 1,
                     ptr: Number(item.ptr) || 0,
                     mrp: Number(item.mrp) || 0,
-                    originalMrp: Number(item.originalMrp) || 0, // Ensure originalMrp is number
+                    originalMrp: Number(item.originalMrp) || 0,
                     discount: Number(item.discount) || 0,
                     taxRate: Number(item.taxRate) || 0,
                     totalItemAmount: Number(item.totalItemAmount) || 0,
@@ -162,78 +208,70 @@ const PurchasePage = () => {
                 totalAmount: Number(bill.totalAmount) || 0,
             }));
             setPurchaseBills(processedBills);
-        } catch (error) {
-            console.error("Error loading purchase bills:", error);
-            toast.error("Failed to load purchase bills.");
-            setPurchaseBills([]);
-        } finally {
-            setPurchaseBillsLoading(false);
-        }
-    }, []);
+            console.log("PurchasePage Firestore: Purchase bills data loaded.");
+        }, (error) => {
+            console.error("PurchasePage Firestore Purchase Bills Error:", error);
+            setError("Error loading purchase bill data from cloud.");
+            toast.error("Error loading purchase bills.");
+        });
 
-    const loadSalesBillsData = useCallback(() => {
-        setSalesBillsLoading(true);
-        try {
-            const storedBills = localStorage.getItem('salesBills');
-            const bills = storedBills ? JSON.parse(storedBills) : [];
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]);
+
+    // Load Sales Bills Data from Firestore
+    useEffect(() => {
+        if (!isAuthReady || !userId) return;
+
+        console.log("PurchasePage Firestore: Setting up sales bills snapshot listener...");
+        const salesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/sales`);
+        const unsubscribe = onSnapshot(salesCollectionRef, (snapshot) => {
+            const bills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const processedBills = bills.map(bill => ({
                 ...bill,
                 items: bill.items.map(item => ({
                     ...item,
-                    quantitySold: Number(item.quantitySold) || 0,
-                    pricePerItem: Number(item.pricePerItem) || 0,
+                    quantity: Number(item.quantity) || 0, // Changed from quantitySold
+                    salePrice: Number(item.salePrice) || 0, // Changed from pricePerItem
                     discount: Number(item.discount) || 0,
-                    totalItemAmount: Number(item.totalItemAmount) || 0,
-                    productMrp: Number(item.productMrp) || 0,
-                    productItemsPerPack: Number(item.productItemsPerPack) || 1,
+                    itemTotal: Number(item.itemTotal) || 0, // Changed from totalItemAmount
+                    mrp: Number(item.mrp) || 0, // Changed from productMrp
+                    itemsPerPack: Number(item.itemsPerPack) || 1, // Changed from productItemsPerPack
                     purchasedMrp: Number(item.purchasedMrp) || 0,
                 }))
             }));
             setSalesBills(processedBills);
-        } catch (error) {
-            console.error("Error loading sales bills:", error);
-            toast.error("Failed to load sales bills.");
-            setSalesBills([]);
-        } finally {
-            setSalesBillsLoading(false);
-        }
-    }, []);
+            console.log("PurchasePage Firestore: Sales bills data loaded.");
+        }, (error) => {
+            console.error("PurchasePage Firestore Sales Bills Error:", error);
+            setError("Error loading sales bills from cloud.");
+            toast.error("Error loading sales bills.");
+        });
 
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]);
+
+
+    // Data update event listener (still useful for other pages to trigger re-renders)
+    // This listener will now cause the Firestore onSnapshot listeners to re-evaluate,
+    // effectively reloading data if underlying data changes (e.g., from other tabs).
     useEffect(() => {
-        loadProductsData();
-        loadPurchaseBillsData();
-        loadSalesBillsData();
-
-        const handleStorageChange = (e) => {
-            if (e.key === 'products' || e.key === 'purchaseBills' || e.key === 'salesBills') {
-                console.log("Storage change detected, reloading data...");
-                loadProductsData();
-                loadPurchaseBillsData();
-                loadSalesBillsData();
-            }
-        };
-
-        window.addEventListener('storage', handleStorageChange);
-
-        // Listen for custom events dispatched by other pages
         const handleDataUpdated = () => {
-            console.log("Custom data update event received, reloading data...");
-            loadProductsData();
-            loadPurchaseBillsData();
-            loadSalesBillsData();
+            console.log("PurchasePage: Data update event received. Firestore listeners will handle reload.");
+            // The onSnapshot listeners above will automatically update state when data changes in Firestore.
+            // No explicit load functions needed here anymore, just a log for awareness.
         };
+
         window.addEventListener("productsUpdated", handleDataUpdated);
         window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
-        window.addEventListener("salesBillsUpdated", handleDataUpdated);
-
+        window.addEventListener("salesUpdated", handleDataUpdated); // Corrected event name from salesBillsUpdated
 
         return () => {
-            window.removeEventListener('storage', handleStorageChange);
             window.removeEventListener("productsUpdated", handleDataUpdated);
             window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
-            window.removeEventListener("salesBillsUpdated", handleDataUpdated);
+            window.removeEventListener("salesUpdated", handleDataUpdated);
         };
-    }, [loadProductsData, loadPurchaseBillsData, loadSalesBillsData]);
+    }, []); // Empty dependency array as it just sets up the listeners
+
 
     // Function to calculate stock by batch for a product (using refs for latest data)
     const getStockByBatch = useCallback((productName) => {
@@ -250,9 +288,9 @@ const PurchasePage = () => {
 
         salesBillsRef.current.forEach(bill => {
             bill.items.forEach(item => {
-                if (item.product.toLowerCase() === productName.toLowerCase()) {
+                if (item.productName.toLowerCase() === productName.toLowerCase()) { // Corrected from item.product
                     const key = `${item.batch.trim()}_${item.expiry.trim()}`;
-                    batchMap.set(key, Math.max(0, (batchMap.get(key) || 0) - Number(item.quantitySold)));
+                    batchMap.set(key, Math.max(0, (batchMap.get(key) || 0) - Number(item.quantity))); // Corrected from quantitySold
                 }
             });
         });
@@ -286,8 +324,8 @@ const PurchasePage = () => {
         return products.filter(product =>
             product.name.toLowerCase().includes(lowerCaseSearchTerm) ||
             product.category.toLowerCase().includes(lowerCaseSearchTerm) ||
-            product.company.toLowerCase().includes(lowerCaseSearchTerm) ||
-            (product.batch && product.batch.toLowerCase().includes(lowerCaseSearchTerm))
+            product.company.toLowerCase().includes(lowerCaseSearchTerm)
+            // Removed batch from product master search as it's not a master field
         ).map(product => ({
             ...product,
             // Add calculated current stock for display in the product Browse list
@@ -310,27 +348,27 @@ const PurchasePage = () => {
             toast.error("Please select a product.");
             return;
         }
-        if (!newQuantity || newQuantity <= 0) {
+        if (!newQuantity || Number(newQuantity) <= 0) { // Ensure quantity is positive
             toast.error("Quantity must be a positive number.");
             return;
         }
-        if (!newBatch) {
+        if (!newBatch.trim()) { // Ensure batch is not just whitespace
             toast.error("Batch number is required.");
             return;
         }
-        if (!newExpiry) {
+        if (!newExpiry.trim()) { // Ensure expiry is not just whitespace
             toast.error("Expiry date is required.");
             return;
         }
-        if (!newPTR || newPTR < 0) {
+        if (Number(newPTR) < 0) { // Allow 0, but not negative
             toast.error("PTR (Price To Retailer) is required and must be non-negative.");
             return;
         }
-        if (!newMRP || newMRP < 0) {
+        if (Number(newMRP) < 0) { // Allow 0, but not negative
             toast.error("MRP is required and must be non-negative.");
             return;
         }
-        if (newDiscount === '' || newDiscount < 0 || newDiscount > 100) {
+        if (Number(newDiscount) < 0 || Number(newDiscount) > 100) { // Allow 0-100
             toast.error("Discount must be between 0 and 100.");
             return;
         }
@@ -350,7 +388,7 @@ const PurchasePage = () => {
             itemsPerPack: selectedProduct.itemsPerPack || 1, // Store items per pack
             ptr: ptr,
             mrp: mrp, // Purchased MRP for this bill item
-            originalMrp: selectedProduct.originalMrp || selectedProduct.mrp, // Store original master MRP
+            originalMrp: selectedProduct.mrp, // Store original master MRP at time of purchase
             unit: selectedProduct.unit,
             category: selectedProduct.category,
             company: selectedProduct.company,
@@ -422,21 +460,23 @@ const PurchasePage = () => {
         setTotalAmount(calculatedTotal);
     }, [currentPurchaseItems]);
 
-    // --- Save/Update Bill Logic ---
-    const handleSaveBill = () => {
-        if (!billNumber || !billDate || !supplierName || currentPurchaseItems.length === 0) {
+    // --- Save/Update Bill Logic (Firestore Integration) ---
+    const handleSaveBill = async () => {
+        if (!userId) {
+            toast.error("User not authenticated. Cannot save bill.");
+            return;
+        }
+        if (!billNumber.trim() || !billDate.trim() || !supplierName.trim() || currentPurchaseItems.length === 0) {
             toast.error("Please fill all bill details and add at least one item.");
             return;
         }
 
-        const newBill = {
-            id: isEditingBill ? editBillId : `PB-${Date.now()}`,
+        const billToSave = {
             billNumber: billNumber.trim(),
             date: billDate,
             supplierName: supplierName.trim(),
             items: currentPurchaseItems.map(item => ({
                 ...item,
-                // Ensure numbers are stored as numbers if they weren't already
                 quantity: Number(item.quantity),
                 packsPurchased: Number(item.packsPurchased),
                 ptr: Number(item.ptr),
@@ -446,60 +486,27 @@ const PurchasePage = () => {
                 taxRate: Number(item.taxRate),
                 totalItemAmount: Number(item.totalItemAmount),
             })),
-            totalAmount: totalAmount,
+            totalAmount: Number(totalAmount),
         };
 
-        let updatedBills;
-        if (isEditingBill) {
-            updatedBills = purchaseBills.map(bill =>
-                bill.id === editBillId ? newBill : bill
-            );
-            toast.success(`Purchase Bill ${billNumber} updated successfully!`);
-        } else {
-            updatedBills = [...purchaseBills, newBill];
-            toast.success(`Purchase Bill ${billNumber} saved successfully!`);
+        try {
+            const purchaseBillsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/purchaseBills`);
+            if (isEditingBill) {
+                await updateDoc(doc(purchaseBillsCollectionRef, editBillId), billToSave);
+                toast.success(`Purchase Bill ${billNumber} updated successfully!`);
+            } else {
+                await addDoc(purchaseBillsCollectionRef, billToSave);
+                toast.success(`Purchase Bill ${billNumber} saved successfully!`);
+            }
+            dispatchDataUpdatedEvent('purchaseBillsUpdated'); // Notify other components
+            dispatchDataUpdatedEvent('productsUpdated'); // Notify product master page for stock recalculation
+
+            resetForm();
+        } catch (error) {
+            console.error("Error saving purchase bill to Firestore: ", error);
+            toast.error("Failed to save purchase bill to cloud.");
         }
-
-        localStorage.setItem('purchaseBills', JSON.stringify(updatedBills));
-        setPurchaseBills(updatedBills); // Update state immediately
-        dispatchDataUpdatedEvent('purchaseBillsUpdated'); // Notify other components
-
-        // Update product master list quantities (not stock calculation, but the master record)
-        updateProductQuantities(currentPurchaseItems);
-
-        resetForm();
     };
-
-    const updateProductQuantities = (items) => {
-        setProducts(prevProducts => {
-            const productsMap = new Map(prevProducts.map(p => [p.id, p]));
-            const updatedProductIds = new Set();
-
-            items.forEach(item => {
-                const productInMaster = productsMap.get(item.id);
-                if (productInMaster) {
-                    // Update master product's MRP, PTR, Discount if purchased with different values
-                    // This is a decision point: do new purchases update master prices?
-                    // For now, let's assume they update the master MRP and PTR to the latest purchased values
-                    productInMaster.mrp = Number(item.mrp);
-                    productInMaster.ptr = Number(item.ptr);
-                    productInMaster.discount = Number(item.discount);
-                    // Also update expiry and batch in master if needed, though typically master is generic
-                    // For simplicity, we are keeping batch/expiry in bill items, not master.
-                    // productInMaster.batch = item.batch;
-                    // productInMaster.expiry = item.expiry;
-                    productsMap.set(item.id, productInMaster);
-                    updatedProductIds.add(item.id);
-                }
-            });
-
-            const finalProducts = Array.from(productsMap.values());
-            localStorage.setItem('products', JSON.stringify(finalProducts));
-            dispatchDataUpdatedEvent('productsUpdated'); // Notify product master page
-            return finalProducts;
-        });
-    };
-
 
     const resetForm = () => {
         setBillNumber('');
@@ -523,28 +530,30 @@ const PurchasePage = () => {
             setEditBillId(billToEdit.id);
             toast.info(`Editing Bill No: ${billToEdit.billNumber}`);
             setViewBillModalOpen(false); // Close view modal if open
+            window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to top of the form
         } else {
             toast.error("Bill not found for editing.");
         }
     };
 
-    const handleDeleteBill = (billId) => {
-        if (window.confirm("Are you sure you want to delete this purchase bill? This action cannot be undone and will affect stock levels.")) {
-            const updatedBills = purchaseBills.filter(bill => bill.id !== billId);
-            localStorage.setItem('purchaseBills', JSON.stringify(updatedBills));
-            setPurchaseBills(updatedBills);
-            dispatchDataUpdatedEvent('purchaseBillsUpdated'); // Notify other components
-            toast.success("Purchase bill deleted successfully!");
-            setViewBillModalOpen(false); // Close view modal if open
+    const handleDeleteBill = async (billId) => {
+        if (!userId) {
+            toast.error("User not authenticated. Cannot delete bill.");
+            return;
+        }
+        // Using a toast for confirmation instead of window.confirm
+        toast.info("Deleting purchase bill...", { duration: 1000 }); // Provide immediate feedback
 
-            // Revert product quantities (simple decrement, actual stock is recalculated by functions)
-            const deletedBill = purchaseBills.find(bill => bill.id === billId);
-            if (deletedBill) {
-                // This is tricky: simply decrementing master quantity is bad.
-                // The current stock calculation already handles this by re-evaluating all bills.
-                // So, no need to manually "revert" quantities in master products.
-                // The dashboard and product selection will always show derived values.
-            }
+        try {
+            const purchaseBillsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/purchaseBills`);
+            await deleteDoc(doc(purchaseBillsCollectionRef, billId));
+            toast.success("Purchase bill deleted successfully!");
+            dispatchDataUpdatedEvent('purchaseBillsUpdated'); // Notify other components
+            dispatchDataUpdatedEvent('productsUpdated'); // Notify product master page for stock recalculation
+            setViewBillModalOpen(false); // Close view modal if open
+        } catch (error) {
+            console.error("Error deleting purchase bill from Firestore: ", error);
+            toast.error("Failed to delete purchase bill from cloud.");
         }
     };
 
@@ -555,6 +564,8 @@ const PurchasePage = () => {
             toast.error("Could not find bill content for PDF export.");
             return;
         }
+
+        toast.info("Generating PDF, please wait...");
 
         html2canvas(input, { scale: 2 }).then((canvas) => {
             const imgData = canvas.toDataURL('image/png');
@@ -640,17 +651,22 @@ const PurchasePage = () => {
     const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
 
-    const isLoading = purchaseBillsLoading || productsLoading || salesBillsLoading;
-
-    if (isLoading) {
+    if (loading || !isAuthReady) { // Combined loading check
         return (
             <div className="flex justify-center items-center h-screen">
                 <div className="loader"></div>
-                <p className="ml-4 text-gray-700">Loading data...</p>
+                <p className="ml-4 text-gray-700">Loading data and authenticating...</p>
             </div>
         );
     }
 
+    if (error) { // Display error if any
+        return (
+            <div className="flex justify-center items-center h-screen text-red-600">
+                <p>{error}</p>
+            </div>
+        );
+    }
 
     return (
         <>
@@ -659,6 +675,13 @@ const PurchasePage = () => {
                 <h2 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-3 border-gray-300">
                     {isEditingBill ? `Edit Purchase Bill: ${billNumber}` : "New Purchase Bill"}
                 </h2>
+
+                {/* Display User ID (MANDATORY for multi-user apps) */}
+                {userId && (
+                    <div className="mb-4 p-3 bg-gray-200 rounded-md text-sm text-gray-700">
+                        <span className="font-semibold">Current User ID:</span> {userId}
+                    </div>
+                )}
 
                 {/* Bill Details Form */}
                 <div className="bg-white p-6 rounded-lg shadow-md mb-8">
@@ -950,7 +973,7 @@ const PurchasePage = () => {
                                     id="productSearch"
                                     value={productSearchTerm}
                                     onChange={(e) => setProductSearchTerm(e.target.value)}
-                                    placeholder="Search by name, category, company, or batch"
+                                    placeholder="Search by name, category, company"
                                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                                 />
                             </div>

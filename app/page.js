@@ -20,6 +20,15 @@ import {
 // or
 // yarn add recharts
 
+// Import Firebase services
+import { db, auth, initializeFirebaseAndAuth } from './lib/firebase';
+import { collection, onSnapshot, query, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+
+// Import the new Login component
+import Login from './components/Login';
+import LogoutButton from './components/LogoutButton'; // Or integrate Logout directly into Header
+
 // Helper function to format date as DD-MM-YYYY
 function formatDate(date) {
   if (!date) return "";
@@ -68,7 +77,10 @@ function parseDate(dateString) {
       !isNaN(yearInt) && yearInt >= 1900 && yearInt <= 2100
     ) {
       // For expiry, we often care about the end of the month
-      return new Date(yearInt, monthInt, 0); // Day 0 of next month is last day of current month
+      // Date constructor: new Date(year, monthIndex, day)
+      // monthIndex is 0-indexed, so monthInt is already correct for monthIndex
+      // Day 0 of the next month gives the last day of the current month.
+      return new Date(yearInt, monthInt, 0); 
     }
   }
 
@@ -76,6 +88,9 @@ function parseDate(dateString) {
 }
 
 export default function Home() {
+  // Very early log to confirm component mounts
+  console.log("Home component mounted/rendered.");
+
   const [products, setProducts] = useState([]); // This will hold product master data
   const [purchaseBills, setPurchaseBills] = useState([]);
   const [salesBills, setSalesBills] = useState([]);
@@ -84,26 +99,64 @@ export default function Home() {
   const [expandedRow, setExpandedRow] = useState(null); // State to track expanded row
   const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState(false); // State for analytics modal
 
-  // --- Data Loading Functions ---
-  const loadProductsData = () => {
-    console.log("Dashboard: Attempting to load products from localStorage...");
-    try {
-      const storedProducts = localStorage.getItem("products");
-      console.log("Dashboard: localStorage 'products' raw data loaded.");
-      const products = storedProducts ? JSON.parse(storedProducts) : [];
-      console.log(
-        "Dashboard: Successfully parsed products. Count:",
-        products.length
-      );
-      const processedProducts = products
+  // Auth related states
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Get the app ID, with a fallback for environments where it might not be defined
+  const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+
+  // --- Initial Firebase Setup and Authentication Listener ---
+  useEffect(() => {
+    console.log("useEffect: Setting up Firebase and Auth listener.");
+    const setupFirebase = async () => {
+      await initializeFirebaseAndAuth(); // Initialize Firebase and sign in
+
+      // Set up auth state observer
+      const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        setCurrentUser(user); // Set the user object
+        setIsAuthReady(true); // Auth state has been determined
+        setLoading(false); // Stop loading after auth state is determined
+        console.log("Firebase: Auth state changed. User:", user ? user.uid : "No user");
+      });
+
+      return () => {
+        console.log("useEffect cleanup: Unsubscribing auth listener.");
+        unsubscribeAuth(); // Clean up auth listener on unmount
+      };
+    };
+
+    setupFirebase();
+  }, []);
+
+  // --- Data Loading Functions (dependent on currentUser) ---
+  useEffect(() => {
+    if (!isAuthReady || !currentUser) {
+      console.log("useEffect (data load): Not loading data. isAuthReady:", isAuthReady, "currentUser:", currentUser);
+      // If auth is not ready or no user is logged in, don't attempt to load data
+      setProducts([]);
+      setPurchaseBills([]);
+      setSalesBills([]);
+      return;
+    }
+
+    console.log("useEffect (data load): User authenticated, setting up Firestore listeners for data.");
+
+    // Load Products Data
+    const productsCollectionRef = collection(db, `artifacts/${appId}/users/${currentUser.uid}/products`);
+    const unsubscribeProducts = onSnapshot(productsCollectionRef, (snapshot) => {
+      const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const processedProducts = productsData
         .map((p) => {
           try {
+            // Expiry Data Check: Product Master
+            console.log(`Expiry Data Check: Product '${p.name}' - Raw Expiry: '${p.expiry}'`);
             return {
               ...p,
-              // quantity: Number(p.quantity) || 0, // This will be calculated from bills
-              mrp: Number(p.mrp) || 0, // Current Selling price (from Master)
-              originalMrp: Number(p.originalMrp) || 0, // Original Purchased MRP (if stored in master)
-              itemsPerPack: Number(p.itemsPerPack) || 1, // Items per pack
+              mrp: Number(p.mrp) || 0,
+              originalMrp: Number(p.originalMrp) || 0,
+              itemsPerPack: Number(p.itemsPerPack) || 1,
               minStock: Number(p.minStock) || 0,
               maxStock: Number(p.maxStock) || 0,
               discount: Number(p.discount) || 0,
@@ -111,7 +164,6 @@ export default function Home() {
               unit: p.unit || "",
               category: p.category || "",
               company: p.company || "",
-              id: p.id,
               batch: p.batch || "",
               expiry: p.expiry || "",
             };
@@ -130,39 +182,25 @@ export default function Home() {
           }
         })
         .filter((p) => p !== null);
-
-      console.log(
-        "Dashboard: Finished processing products. Valid product count:",
-        processedProducts.length
-      );
       setProducts(processedProducts);
-    } catch (err) {
-      console.error(
-        "Dashboard: Error loading or parsing products from localStorage:",
-        err
-      );
-      setError("Error loading product master data.");
-      toast.error("Error loading product master data.");
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+      console.log("Firestore: Products data loaded for user", currentUser.uid);
+    }, (error) => {
+      console.error("Firestore Products Error:", error);
+      setError("Error loading product data from cloud.");
+      toast.error("Error loading product data.");
+    });
 
-  const loadPurchaseBillsData = () => {
-    console.log(
-      "Dashboard: Attempting to load purchase bills from localStorage..."
-    );
-    try {
-      const storedBills = localStorage.getItem("purchaseBills");
-      const bills = storedBills ? JSON.parse(storedBills) : [];
-      console.log(
-        "Dashboard: Successfully parsed purchase bills. Count:",
-        bills.length
-      );
-      const processedBills = bills
+    // Load Purchase Bills Data
+    const purchaseBillsCollectionRef = collection(db, `artifacts/${appId}/users/${currentUser.uid}/purchaseBills`);
+    const unsubscribePurchaseBills = onSnapshot(purchaseBillsCollectionRef, (snapshot) => {
+      const billsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const processedBills = billsData
         .map((bill) => {
           try {
+            bill.items.forEach(item => {
+              // Expiry Data Check: Purchase Bill Item
+              console.log(`Expiry Data Check: Purchase Bill ${bill.billNumber}, Product '${item.product}' - Raw Expiry: '${item.expiry}'`);
+            });
             return {
               ...bill,
               date: bill.date || "",
@@ -171,17 +209,18 @@ export default function Home() {
                 product: item.product || "",
                 batch: item.batch || "",
                 expiry: item.expiry || "",
-                quantity: Number(item.quantity) || 0, // Quantity purchased in this line
+                quantity: Number(item.quantity) || 0,
                 packsPurchased: Number(item.packsPurchased) || 0,
                 itemsPerPack: Number(item.itemsPerPack) || 1,
                 ptr: Number(item.ptr) || 0,
-                mrp: Number(item.mrp) || 0, // Entered/Confirmed MRP from Purchase
-                originalMrp: Number(item.originalMrp) || 0, // Original Master MRP from Purchase
+                mrp: Number(item.mrp) || 0,
+                originalMrp: Number(item.originalMrp) || 0,
                 unit: item.unit || "",
                 category: item.category || "",
                 company: item.company || "",
-                discount: Number(item.discount) || 0, // Discount on Purchase
+                discount: Number(item.discount) || 0,
                 taxRate: Number(item.taxRate) || 0,
+                totalItemAmount: Number(item.totalItemAmount) || 0,
               })),
               totalAmount: Number(bill.totalAmount) || 0,
             };
@@ -191,8 +230,7 @@ export default function Home() {
               bill,
               mapErr
             );
-            // Decide if you want a toast here or just log the error
-            return null; // Filter out problematic bills
+            return null;
           }
         })
         .filter((bill) => bill !== null);
@@ -206,52 +244,41 @@ export default function Home() {
         return dateB - dateA;
       });
       setPurchaseBills(processedBills);
-    } catch (err) {
-      console.error(
-        "Dashboard: Error loading or parsing purchase bills:",
-        err
-      );
-      setError("Error loading purchase bill data.");
+      console.log("Firestore: Purchase bills data loaded for user", currentUser.uid);
+    }, (error) => {
+      console.error("Firestore Purchase Bills Error:", error);
+      setError("Error loading purchase bill data from cloud.");
       toast.error("Error loading purchase bill data.");
-      setPurchaseBills([]);
-    }
-  };
+    });
 
-  const loadSalesBillsData = () => {
-    console.log("Dashboard: Attempting to load sales bills from localStorage...");
-    try {
-      // Changed from 'salesBills' to 'sales' to match SalesPage storage
-      const storedBills = localStorage.getItem("sales");
-      const bills = storedBills ? JSON.parse(storedBills) : [];
-      console.log(
-        "Dashboard: Successfully parsed sales bills. Count:",
-        bills.length
-      );
-      const processedBills = bills
+    // Load Sales Bills Data
+    const salesCollectionRef = collection(db, `artifacts/${appId}/users/${currentUser.uid}/sales`);
+    const unsubscribeSales = onSnapshot(salesCollectionRef, (snapshot) => {
+      const billsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const processedBills = billsData
         .map((bill) => {
           try {
+            bill.items.forEach(item => {
+              // Expiry Data Check: Sales Bill Item
+              console.log(`Expiry Data Check: Sales Bill ${bill.id}, Product '${item.productName}' - Raw Expiry: '${item.expiry}'`);
+            });
             return {
               ...bill,
-              // Ensure date is formatted consistently if needed, or just use as is
-              saleDate: bill.saleDate || "", // Use saleDate from SalesPage
-              grandTotal: Number(bill.grandTotal) || 0, // Use grandTotal from SalesPage
+              saleDate: bill.saleDate || "",
+              grandTotal: Number(bill.grandTotal) || 0,
               customerName: bill.customerName || "",
               items: bill.items.map((item) => ({
                 ...item,
-                // Use 'quantity' as stored in SalesPage, not 'quantitySold'
                 quantity: Number(item.quantity) || 0,
-                salePrice: Number(item.salePrice) || 0, // Use salePrice from SalesPage
-                discount: Number(item.discount) || 0, // Discount on Sale
-                itemTotal: Number(item.itemTotal) || 0, // Use itemTotal from SalesPage
-                mrp: Number(item.mrp) || 0, // MRP from SalesPage item
-                // productItemsPerPack: Number(item.productItemsPerPack) || 1, // Not directly from SalesPage item
-                // purchasedMrp: Number(item.purchasedMrp) || 0, // Not directly from SalesPage item
-                productName: item.productName || "", // Use productName from SalesPage
+                salePrice: Number(item.salePrice) || 0,
+                discount: Number(item.discount) || 0,
+                itemTotal: Number(item.itemTotal) || 0,
+                mrp: Number(item.mrp) || 0,
+                productName: item.productName || "",
                 batch: item.batch || "",
                 expiry: item.expiry || "",
                 unit: item.unit || "",
                 category: item.category || "",
-                // company: item.company || "", // Not directly from SalesPage item
               })),
             };
           } catch (mapErr) {
@@ -260,14 +287,12 @@ export default function Home() {
               bill,
               mapErr
             );
-            // Decide if you want a toast here or just log the error
-            return null; // Filter out problematic bills
+            return null;
           }
         })
         .filter((bill) => bill !== null);
 
       processedBills.sort((a, b) => {
-        // Sort by saleDate from SalesPage
         const dateA = parseDate(a.saleDate);
         const dateB = parseDate(b.saleDate);
         if (!dateA && !dateB) return 0;
@@ -276,45 +301,44 @@ export default function Home() {
         return dateB - dateA;
       });
       setSalesBills(processedBills);
-    } catch (err) {
-      console.error("Dashboard: Error loading or parsing sales bills:", err);
+      console.log("Firestore: Sales bills data loaded for user", currentUser.uid);
+    }, (error) => {
+      console.error("Firestore Sales Bills Error:", error);
       setError("Error loading sales bill data.");
       toast.error("Error loading sales bill data.");
-      setSalesBills([]);
-    }
-  };
+    });
+
+    return () => {
+      console.log("useEffect cleanup (data load): Unsubscribing Firestore listeners.");
+      unsubscribeProducts();
+      unsubscribePurchaseBills();
+      unsubscribeSales();
+    };
+  }, [isAuthReady, currentUser, appId]);
 
 
-  // --- Initial Data Loading Effects ---
-  useEffect(() => {
-    loadProductsData();
-    loadPurchaseBillsData();
-    loadSalesBillsData();
-  }, []);
-
-  // Listen for updates from other pages (e.g., Product Master, Purchase, Sales)
+  // --- Data update event listener (still useful for other pages to trigger re-renders) ---
+  // This listener will now cause the Firestore onSnapshot listeners to re-evaluate,
+  // effectively reloading data if underlying data changes (e.g., from other tabs).
   useEffect(() => {
     const handleDataUpdated = () => {
-      console.log("Dashboard: Data updated event received. Reloading all data.");
-      // Reload all data when any dataUpdated event is dispatched
-      loadProductsData();
-      loadPurchaseBillsData();
-      loadSalesBillsData();
+      console.log("Dashboard: Data updated event received. Firestore listeners will handle reload.");
+      // The onSnapshot listeners above will automatically update state when data changes in Firestore.
+      // No explicit load functions needed here anymore, just a log for awareness.
     };
 
     window.addEventListener("productsUpdated", handleDataUpdated);
     window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
-    window.addEventListener("salesUpdated", handleDataUpdated); // Listen for 'salesUpdated' from SalesPage
+    window.addEventListener("salesUpdated", handleDataUpdated);
 
     return () => {
       window.removeEventListener("productsUpdated", handleDataUpdated);
       window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
       window.removeEventListener("salesUpdated", handleDataUpdated);
     };
-  }, []);
+  }, []); // Empty dependency array as it just sets up the listeners
 
-  // Function to calculate stock by batch for a product - moved inside Home component
-  // to access purchaseBills and salesBills directly without passing them explicitly
+  // Function to calculate stock by batch for a product
   const getStockByBatch = useCallback((productName) => {
     const batchMap = new Map(); // Key: batch_expiry, Value: quantity
 
@@ -323,6 +347,8 @@ export default function Home() {
       bill.items.forEach((item) => {
         if (item.product.toLowerCase() === productName.toLowerCase()) {
           const key = `${item.batch.trim()}_${item.expiry.trim()}`;
+          // Expiry Data Check: getStockByBatch (Purchase)
+          console.log(`Expiry Data Check: getStockByBatch (Purchase) - Product: '${productName}', Batch Key: '${key}', Raw Expiry: '${item.expiry}'`);
           batchMap.set(key, (batchMap.get(key) || 0) + Number(item.quantity));
         }
       });
@@ -331,9 +357,10 @@ export default function Home() {
     // Subtract quantities from sales bills
     salesBills.forEach((bill) => {
       bill.items.forEach((item) => {
-        // Use 'productName' from sales item and 'quantity'
         if (item.productName.toLowerCase() === productName.toLowerCase()) {
           const key = `${item.batch.trim()}_${item.expiry.trim()}`;
+          // Expiry Data Check: getStockByBatch (Sales)
+          console.log(`Expiry Data Check: getStockByBatch (Sales) - Product: '${productName}', Batch Key: '${key}', Raw Expiry: '${item.expiry}'`);
           batchMap.set(
             key,
             Math.max(0, (batchMap.get(key) || 0) - Number(item.quantity))
@@ -352,8 +379,10 @@ export default function Home() {
 
     // Filter out batches with zero stock and sort by expiry date
     batchStockList.sort((a, b) => {
-      const dateA = parseDate(a.expiry); // Use the enhanced parseDate
+      const dateA = parseDate(a.expiry);
       const dateB = parseDate(b.expiry);
+      // Expiry Data Check: getStockByBatch (Sorting)
+      console.log(`Expiry Data Check: getStockByBatch (Sorting) - A.expiry: '${a.expiry}', B.expiry: '${b.expiry}', Parsed A: ${dateA}, Parsed B: ${dateB}`);
       if (!dateA && !dateB) return 0;
       if (!dateA) return 1;
       if (!dateB) return -1;
@@ -361,7 +390,7 @@ export default function Home() {
     });
 
     return batchStockList;
-  }, [purchaseBills, salesBills]); // Dependencies for useCallback
+  }, [purchaseBills, salesBills]);
 
   // Calculate the total stock for a product using getStockByBatch
   const calculateTotalStockForProduct = useCallback((productName) => {
@@ -369,21 +398,16 @@ export default function Home() {
     return batchStocks.reduce((sum, batch) => sum + batch.quantity, 0);
   }, [getStockByBatch]);
 
-
   // --- Products with calculated current stock for display ---
   const productsWithCalculatedStock = useMemo(() => {
     console.log("Dashboard useMemo: Recalculating products with current stock...");
     return products.map(product => ({
       ...product,
-      // Override the quantity from master with the calculated current stock
-      // This ensures consistency between the main table and detailed batch stock
       quantity: calculateTotalStockForProduct(product.name)
     }));
   }, [products, calculateTotalStockForProduct]);
 
-
   // --- Other Calculations (Memoized) ---
-
   const totalStockValue = useMemo(() => {
     console.log("Dashboard useMemo: Calculating total stock value...");
     return productsWithCalculatedStock.reduce(
@@ -404,7 +428,6 @@ export default function Home() {
     return productsWithCalculatedStock.filter((product) => product.quantity === 0);
   }, [productsWithCalculatedStock]);
 
-  // Calculate total purchase value
   const totalPurchaseValue = useMemo(() => {
     console.log("Dashboard useMemo: Calculating total purchase value...");
     return purchaseBills.reduce(
@@ -413,61 +436,68 @@ export default function Home() {
     );
   }, [purchaseBills]);
 
-  // Calculate total sales value
   const totalSalesValue = useMemo(() => {
     console.log("Dashboard useMemo: Calculating total sales value...");
-    // Use grandTotal from salesBills
     return salesBills.reduce(
       (total, bill) => total + (Number(bill.grandTotal) || 0),
       0
     );
   }, [salesBills]);
 
-  // Calculate products nearing expiry
   const nearExpiryProducts = useMemo(() => {
     console.log("Dashboard useMemo: Calculating near expiry products...");
     const today = new Date();
-    // Set today's date to the beginning of the day for consistent comparison
     today.setHours(0, 0, 0, 0);
 
     const twoMonthsLater = new Date();
-    twoMonthsLater.setMonth(today.getMonth() + 2);
-    // Set to the end of the month for two months later for inclusive comparison
-    twoMonthsLater.setDate(0); // Day 0 of next month is last day of current month
+    // Corrected calculation: Set to the month *three* months from now, then set day to 0
+    // to get the last day of the month that is two months from 'today'.
+    twoMonthsLater.setMonth(today.getMonth() + 3);
+    twoMonthsLater.setDate(0); 
     twoMonthsLater.setHours(23, 59, 59, 999);
+
+    console.log(`Expiry Date Range Check: Today: ${today.toDateString()}, Two Months Later (end of month): ${twoMonthsLater.toDateString()}`);
 
     const productsNearingExpiryList = [];
 
-    // Iterate through productsWithCalculatedStock to get current stock and expiry
     productsWithCalculatedStock.forEach(product => {
-      // Get stock for each batch of the product
       const batchStocks = getStockByBatch(product.name);
 
       batchStocks.forEach(batch => {
-        const productExpiryDate = parseDate(batch.expiry); // Use parseDate for consistency
-        if (productExpiryDate && batch.quantity > 0) { // Only consider batches with stock
-          // Check if expiry date is after today AND before or on twoMonthsLater
-          if (productExpiryDate > today && productExpiryDate <= twoMonthsLater) {
-            productsNearingExpiryList.push({
-              id: product.id,
-              name: product.name,
-              batch: batch.batch,
-              expiry: batch.expiry,
-              quantity: batch.quantity // Quantity for this specific batch
-            });
-          }
+        const productExpiryDate = parseDate(batch.expiry);
+        // Expiry Data Check: nearExpiryProducts (Processing)
+        console.log(`Expiry Data Check: nearExpiryProducts - Product: '${product.name}', Batch: '${batch.batch}', Raw Expiry: '${batch.expiry}', Parsed Date: ${productExpiryDate}`);
+        
+        const isNearExpiry = productExpiryDate && batch.quantity > 0 &&
+                             productExpiryDate > today && productExpiryDate <= twoMonthsLater;
+        
+        console.log(`Expiry Data Check: nearExpiryProducts - Condition check for '${product.name}' (Batch: '${batch.batch}', Expiry: '${batch.expiry}'):`);
+        console.log(`  - Parsed Date valid: ${!!productExpiryDate}`);
+        console.log(`  - Quantity > 0: ${batch.quantity > 0}`);
+        console.log(`  - Expiry > Today: ${productExpiryDate > today}`);
+        console.log(`  - Expiry <= Two Months Later: ${productExpiryDate <= twoMonthsLater}`);
+        console.log(`  - Overall isNearExpiry: ${isNearExpiry}`);
+
+        if (isNearExpiry) {
+          productsNearingExpiryList.push({
+            id: product.id,
+            name: product.name,
+            batch: batch.batch,
+            expiry: batch.expiry,
+            quantity: batch.quantity
+          });
         }
       });
     });
+    console.log("Final nearExpiryProducts list:", productsNearingExpiryList);
     return productsNearingExpiryList;
   }, [productsWithCalculatedStock, getStockByBatch]);
 
   // --- Analytics Calculations ---
-
   const monthlyTrends = useMemo(() => {
     console.log("Dashboard useMemo: Calculating monthly sales and purchase trends...");
-    const salesByMonth = new Map(); // Key: YYYY-MM, Value: total sales amount
-    const purchasesByMonth = new Map(); // Key: YYYY-MM, Value: total purchase amount
+    const salesByMonth = new Map();
+    const purchasesByMonth = new Map();
 
     salesBills.forEach(bill => {
       const date = parseDate(bill.saleDate);
@@ -497,9 +527,8 @@ export default function Home() {
 
   const productAnalytics = useMemo(() => {
     console.log("Dashboard useMemo: Calculating product-wise analytics...");
-    const productData = new Map(); // Key: productName, Value: { totalSoldQuantity, totalPurchasedQuantity, totalSalesValue, totalPurchaseValue }
+    const productData = new Map();
 
-    // Aggregate sales data
     salesBills.forEach(bill => {
       bill.items.forEach(item => {
         const name = item.productName.toLowerCase();
@@ -509,7 +538,7 @@ export default function Home() {
             totalPurchasedQuantity: 0,
             totalSalesValue: 0,
             totalPurchaseValue: 0,
-            productName: item.productName // Keep original case for display
+            productName: item.productName
           });
         }
         const current = productData.get(name);
@@ -519,7 +548,6 @@ export default function Home() {
       });
     });
 
-    // Aggregate purchase data
     purchaseBills.forEach(bill => {
       bill.items.forEach(item => {
         const name = item.product.toLowerCase();
@@ -529,7 +557,7 @@ export default function Home() {
             totalPurchasedQuantity: 0,
             totalSalesValue: 0,
             totalPurchaseValue: 0,
-            productName: item.product // Keep original case for display
+            productName: item.product
           });
         }
         const current = productData.get(name);
@@ -539,29 +567,29 @@ export default function Home() {
       });
     });
 
-    return Array.from(productData.values()).sort((a, b) => b.totalSoldQuantity - a.totalSoldQuantity); // Sort by most sold
+    return Array.from(productData.values()).sort((a, b) => b.totalSoldQuantity - a.totalSoldQuantity);
   }, [salesBills, purchaseBills]);
 
   const mostSoldProduct = useMemo(() => {
     console.log("Dashboard useMemo: Identifying most sold product...");
     if (productAnalytics.length === 0) return null;
-    return productAnalytics[0]; // Already sorted by totalSoldQuantity
+    return productAnalytics[0];
   }, [productAnalytics]);
 
 
   // --- UI Handlers ---
-
   const toggleRowExpansion = (productId) => {
     console.log(`Toggling expansion for product ID: ${productId}`);
     setExpandedRow(expandedRow === productId ? null : productId);
   };
 
-  // Function to get purchase history for a specific product
   const getPurchaseHistory = (productName) => {
     const history = [];
     purchaseBills.forEach((bill) => {
       bill.items.forEach((item) => {
         if (item.product.toLowerCase() === productName.toLowerCase()) {
+          // Expiry Data Check: Purchase History Item
+          console.log(`Expiry Data Check: Purchase History - Product: '${productName}', Bill: '${bill.billNumber}', Raw Expiry: '${item.expiry}'`);
           history.push({
             billNumber: bill.billNumber,
             date: bill.date,
@@ -571,15 +599,14 @@ export default function Home() {
             quantity: item.quantity,
             ptr: item.ptr,
             itemsPerPack: item.itemsPerPack,
-            mrp: Number(item.mrp), // Ensure number
-            originalMrp: Number(item.originalMrp), // Ensure number
-            discount: item.discount,
-            totalItemAmount: item.totalItemAmount,
+            mrp: Number(item.mrp),
+            originalMrp: Number(item.originalMrp),
+            discount: Number(item.discount),
+            totalItemAmount: Number(item.totalItemAmount),
           });
         }
       });
     });
-    // Sort history by date, newest first
     history.sort((a, b) => {
       const dateA = parseDate(a.date);
       const dateB = parseDate(b.date);
@@ -591,32 +618,28 @@ export default function Home() {
     return history;
   };
 
-  // Function to get sales history for a specific product
   const getSalesHistory = (productName) => {
     const history = [];
     salesBills.forEach((bill) => {
       bill.items.forEach((item) => {
-        // Use 'productName' from sales item
         if (item.productName.toLowerCase() === productName.toLowerCase()) {
+          // Expiry Data Check: Sales History Item
+          console.log(`Expiry Data Check: Sales History - Product: '${productName}', Bill: '${bill.id}', Raw Expiry: '${item.expiry}'`);
           history.push({
-            // Use 'saleDate' from sales bill
-            billNumber: bill.id, // SalesPage uses 'id' as bill identifier
-            date: bill.saleDate, // Use saleDate from SalesPage
+            billNumber: bill.id,
+            date: bill.saleDate,
             customer: bill.customerName,
             batch: item.batch,
             expiry: item.expiry,
-            quantity: Number(item.quantity), // Use 'quantity' from sales item
-            salePrice: Number(item.salePrice), // Use 'salePrice' from sales item
+            quantity: Number(item.quantity),
+            salePrice: Number(item.salePrice),
             discount: Number(item.discount),
-            itemTotal: Number(item.itemTotal), // Use 'itemTotal' from sales item
-            mrp: Number(item.mrp), // MRP from SalesPage item
-            // productItemsPerPack: Number(item.productItemsPerPack), // Not directly from SalesPage item
-            // purchasedMrp: Number(item.purchasedMrp), // Not directly from SalesPage item
+            itemTotal: Number(item.itemTotal),
+            mrp: Number(item.mrp),
           });
         }
       });
     });
-    // Sort history by date, newest first
     history.sort((a, b) => {
       const dateA = parseDate(a.date);
       const dateB = parseDate(b.date);
@@ -628,17 +651,15 @@ export default function Home() {
     return history;
   };
 
-  // Helper function to convert data to CSV format
   const convertToCSV = (data, headers) => {
     const csvRows = [];
-    csvRows.push(headers.join(',')); // Add header row
+    csvRows.push(headers.join(','));
 
     for (const row of data) {
       const values = headers.map(header => {
         const value = row[header] || '';
-        // Handle nested objects for purchase/sales items if needed, or flatten beforehand
         if (typeof value === 'string') {
-          return `"${value.replace(/"/g, '""')}"`; // Escape double quotes
+          return `"${value.replace(/"/g, '""')}"`;
         }
         return value;
       });
@@ -647,11 +668,10 @@ export default function Home() {
     return csvRows.join('\n');
   };
 
-  // Function to download CSV
   const downloadCSV = (data, filename) => {
     const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    if (link.download !== undefined) { // feature detection
+    if (link.download !== undefined) {
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
       link.setAttribute('download', filename);
@@ -662,21 +682,19 @@ export default function Home() {
     }
   };
 
-  // Function to trigger data export
   const handleExportData = () => {
+    console.log("Attempting to export data..."); // Added for debugging
     if (productsWithCalculatedStock.length === 0 && purchaseBills.length === 0 && salesBills.length === 0) {
       toast.info("No data to export.");
       return;
     }
 
-    // Export Products
     if (productsWithCalculatedStock.length > 0) {
       const productHeaders = [
         'id', 'name', 'quantity', 'mrp', 'originalMrp', 'itemsPerPack',
         'minStock', 'maxStock', 'discount', 'unit', 'category', 'company',
         'batch', 'expiry'
       ];
-      // Use productsWithCalculatedStock for export to reflect current calculated quantity
       const productCSV = convertToCSV(productsWithCalculatedStock, productHeaders);
       downloadCSV(productCSV, 'products_export.csv');
       toast.success("Product data exported successfully!");
@@ -684,9 +702,7 @@ export default function Home() {
       toast.info("No product data to export.");
     }
 
-    // Export Purchase Bills
     if (purchaseBills.length > 0) {
-      // Flatten purchase bill data for CSV export
       const flattenedPurchaseData = [];
       purchaseBills.forEach(bill => {
         bill.items.forEach(item => {
@@ -727,27 +743,27 @@ export default function Home() {
       toast.info("No purchase bill data to export.");
     }
 
-    // Export Sales Bills
     if (salesBills.length > 0) {
-      // Flatten sales bill data for CSV export
       const flattenedSalesData = [];
       salesBills.forEach(bill => {
         bill.items.forEach(item => {
           flattenedSalesData.push({
-            billId: bill.id, // Use 'id' from SalesPage as bill ID
-            saleDate: bill.saleDate, // Use 'saleDate' from SalesPage
+            billId: bill.id,
+            saleDate: bill.saleDate,
             customerName: bill.customerName,
-            grandTotal: bill.grandTotal, // Use 'grandTotal' from SalesPage
-            productName: item.productName, // Use 'productName' from SalesPage item
-            quantity: item.quantity, // Use 'quantity' from SalesPage item
-            salePrice: item.salePrice, // Use 'salePrice' from SalesPage item
-            discount: item.discount,
-            itemTotal: item.itemTotal, // Use 'itemTotal' from SalesPage item
-            mrp: item.mrp, // MRP from SalesPage item
+            grandTotal: bill.grandTotal,
+            productName: item.productName,
+            quantity: item.quantity,
+            salePrice: Number(item.salePrice), // Ensure discount is a number
+            discount: Number(item.discount), // Ensure discount is a number
+            itemTotal: Number(item.itemTotal), // Ensure itemTotal is a number
+            mrp: Number(item.mrp), // Ensure mrp is a number
             batch: item.batch,
             expiry: item.expiry,
             unit: item.unit,
             category: item.category,
+            // Add purchasedMrp if it exists in your sales item data
+            purchasedMrp: Number(item.purchasedMrp) || 0,
           });
         });
       });
@@ -755,7 +771,7 @@ export default function Home() {
       const salesHeaders = [
         'billId', 'saleDate', 'customerName', 'grandTotal', 'productName',
         'quantity', 'salePrice', 'discount', 'itemTotal',
-        'mrp', 'batch', 'expiry', 'unit', 'category'
+        'mrp', 'batch', 'expiry', 'unit', 'category', 'purchasedMrp' // Added purchasedMrp to headers
       ];
       const salesCSV = convertToCSV(flattenedSalesData, salesHeaders);
       downloadCSV(salesCSV, 'sales_bills_export.csv');
@@ -766,16 +782,23 @@ export default function Home() {
   };
 
 
-  if (loading) {
+  if (loading || !isAuthReady) { // Also wait for authentication to be ready
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="loader"></div>
-        <p className="ml-4 text-gray-700">Loading data...</p>
+        <p className="ml-4 text-gray-700">Loading data and authenticating...</p>
       </div>
     );
   }
 
+  // If user is not logged in, show the Login component
+  if (!currentUser) {
+    console.log("Rendering Login component as no current user.");
+    return <Login />;
+  }
+
   if (error) {
+    console.error("Dashboard error:", error);
     return (
       <div className="flex justify-center items-center h-screen text-red-600">
         <p>{error}</p>
@@ -806,6 +829,18 @@ export default function Home() {
                 New Sale
               </Button>
             </Link>
+            {/* New Link for Supplier Master */}
+            <Link href="/supplier" passHref>
+              <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors duration-200">
+                Supplier Master
+              </Button>
+            </Link>
+            {/* New Link for Customer Master */}
+            <Link href="/customer" passHref>
+              <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors duration-200">
+                Customer Master
+              </Button>
+            </Link>
             {/* Export Button */}
             <Button
               onClick={handleExportData}
@@ -820,8 +855,16 @@ export default function Home() {
             >
                 <BarChartIcon className="mr-2 h-4 w-4" /> View Analytics
             </Button>
+            {/* Logout Button */}
+            
           </div>
         </div>
+
+        {currentUser && (
+            <div className="mb-4 p-3 bg-gray-200 rounded-md text-sm text-gray-700">
+                <span className="font-semibold">Current User ID:</span> {currentUser.uid}
+            </div>
+        )}
 
         {/* Summary Section */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -896,7 +939,7 @@ export default function Home() {
                     className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                   >
                     Original Purchased MRP/Pack
-                  </th> {/* NEW column header */}
+                  </th>
                   <th
                     scope="col"
                     className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider"
@@ -916,7 +959,6 @@ export default function Home() {
                 {productsWithCalculatedStock.length > 0 ? (
                   productsWithCalculatedStock.map((product) => (
                     <React.Fragment key={product.id}>
-                      {/* Main Product Row */}
                       <tr
                         className={`hover:bg-gray-100 transition duration-100 ease-in-out ${
                           expandedRow === product.id ? "bg-indigo-50" : ""
@@ -941,7 +983,7 @@ export default function Home() {
                           ₹{Number(product.mrp).toFixed(2)}
                         </td>
                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
-                          {product.originalMrp > 0 ? `₹${Number(product.originalMrp).toFixed(2)}` : '-'} {/* Display Original Purchased MRP */}
+                          {product.originalMrp > 0 ? `₹${Number(product.originalMrp).toFixed(2)}` : '-'}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-center text-sm font-semibold">
                           {product.quantity === 0 ? (
@@ -977,14 +1019,10 @@ export default function Home() {
                           </Button>
                         </td>
                       </tr>
-                      {/* Expandable Content Row */}
-                      {/* Apply dynamic max-height based on expandedRow state */}
                       <tr className={`${expandedRow === product.id ? 'bg-indigo-50' : 'hidden'}`}>
                           <td colSpan="9" className="p-4">
                             {" "}
-                            {/* Adjusted colspan */}
                             <div className={`expandable-content ${expandedRow === product.id ? 'expanded' : ''}`}>
-                              {/* Batch Stock Details */}
                               <div className="mb-6">
                                 <h4 className="text-md font-semibold text-gray-800 mb-2">
                                   Stock by Batch:
@@ -1049,7 +1087,6 @@ export default function Home() {
                                 </div>
                               </div>
 
-                              {/* Purchase History */}
                               <div className="mb-6">
                                 <h4 className="text-md font-semibold text-gray-800 mb-2">
                                   Purchase History:
@@ -1105,13 +1142,13 @@ export default function Home() {
                                           className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
                                         >
                                           Entered MRP/Pack
-                                        </th> {/* Display Entered MRP from Purchase */}
+                                        </th>
                                         <th
                                           scope="col"
                                           className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
                                         >
                                           Original Master MRP/Pack
-                                        </th> {/* Display Original Master MRP from Purchase */}
+                                        </th>
                                         <th
                                           scope="col"
                                           className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
@@ -1158,9 +1195,9 @@ export default function Home() {
                                               </td>
                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                 ₹{Number(purchase.mrp).toFixed(2)}
-                                              </td> {/* Display Entered MRP from Purchase */}
+                                              </td>
                                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                {purchase.originalMrp > 0 ? `₹${Number(purchase.originalMrp).toFixed(2)}` : '-'} {/* Display Original Master MRP from Purchase */}
+                                                {purchase.originalMrp > 0 ? `₹${Number(purchase.originalMrp).toFixed(2)}` : '-'}
                                               </td>
                                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                 {Number(purchase.discount).toFixed(2)}%
@@ -1174,7 +1211,7 @@ export default function Home() {
                                       ) : (
                                         <tr>
                                           <td
-                                            colSpan="11" /* Adjusted colspan */
+                                            colSpan="11"
                                             className="px-3 py-2 text-center text-sm text-gray-500"
                                           >
                                             No purchase history found for this
@@ -1187,7 +1224,6 @@ export default function Home() {
                                 </div>
                               </div>
 
-                              {/* Sales History */}
                               <div>
                                 <h4 className="text-md font-semibold text-gray-800 mb-2">
                                   Sales History:
@@ -1249,13 +1285,13 @@ export default function Home() {
                                           className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
                                         >
                                           Sale MRP/Pack
-                                        </th> {/* Display MRP used for this sale */}
+                                        </th>
                                         <th
                                           scope="col"
                                           className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
                                         >
                                           Purchased MRP/Pack
-                                        </th> {/* Display Purchased MRP */}
+                                        </th>
                                         <th
                                           scope="col"
                                           className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
@@ -1299,9 +1335,9 @@ export default function Home() {
                                               </td>
                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                 ₹{Number(sale.mrp).toFixed(2)}
-                                              </td> {/* Display Sale MRP */}
+                                              </td>
                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                {sale.purchasedMrp > 0 ? `₹${Number(sale.purchasedMrp).toFixed(2)}` : '-'} {/* Display Purchased MRP */}
+                                                {sale.purchasedMrp > 0 ? `₹${Number(sale.purchasedMrp).toFixed(2)}` : '-'}
                                               </td>
                                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                                                 ₹{Number(sale.itemTotal).toFixed(2)}
@@ -1312,7 +1348,7 @@ export default function Home() {
                                       ) : (
                                         <tr>
                                           <td
-                                            colSpan="11" /* Adjusted colspan */
+                                            colSpan="11"
                                             className="px-3 py-2 text-center text-sm text-gray-500"
                                           >
                                             No sales history found for this
@@ -1332,7 +1368,7 @@ export default function Home() {
                 ) : (
                   <tr>
                     <td
-                      colSpan="9" /* Adjusted colspan */
+                      colSpan="9"
                       className="px-3 py-4 text-center text-sm text-gray-500"
                     >
                       No products found in the master list.
@@ -1343,7 +1379,7 @@ export default function Home() {
             </table>
           </div>
         </div>
-        
+
 
         {/* Low Stock and Out of Stock Alerts */}
         {(lowStockProducts.length > 0 || outOfStockProducts.length > 0 || nearExpiryProducts.length > 0) && (
@@ -1418,7 +1454,7 @@ export default function Home() {
             <div className="mb-6">
               <h4 className="text-xl font-semibold text-gray-800 mb-3">Monthly Sales & Purchase Trends</h4>
               {monthlyTrends.length > 0 ? (
-                <div className="h-80 w-full"> {/* Added height for chart */}
+                <div className="h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
                       data={monthlyTrends}
@@ -1463,10 +1499,10 @@ export default function Home() {
               <h4 className="text-xl font-semibold text-gray-800 mb-3">Product-wise Sales & Purchase Overview</h4>
               {productAnalytics.length > 0 ? (
                 <>
-                  <div className="h-80 w-full mb-6"> {/* Added height for chart */}
+                  <div className="h-80 w-full mb-6">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={productAnalytics.slice(0, 10)} // Show top 10 products
+                        data={productAnalytics.slice(0, 10)}
                         margin={{
                           top: 5,
                           right: 30,
@@ -1563,7 +1599,6 @@ export default function Home() {
 
         /* This class is applied by React when the row is expanded */
         tr.bg-indigo-50 + tr .expandable-content {
-          /* A large enough value to accommodate the content */
           max-height: 1000px;
         }
 
