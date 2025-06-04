@@ -26,7 +26,7 @@ import { collection, onSnapshot, query, addDoc, updateDoc, deleteDoc, doc } from
 import { onAuthStateChanged } from 'firebase/auth';
 
 // Import the new Login component
-import Login from './components/Login';
+
 import LogoutButton from './components/LogoutButton'; // Or integrate Logout directly into Header
 
 // Helper function to format date as DD-MM-YYYY
