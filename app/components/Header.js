@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import LogoutButton from './LogoutButton'; // Import the LogoutButton component
+import { Package } from 'lucide-react'; // Import the Package icon from lucide-react
 
 const Header = () => {
     return (
@@ -14,20 +15,11 @@ const Header = () => {
                     className="flex title-font font-bold items-center text-gray-900 mb-4 md:mb-0
                                transform transition-transform duration-300 hover:scale-105 hover:text-indigo-600" // Added hover effect
                 >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
+                    {/* Replaced the old SVG with the Lucide Package icon */}
+                    <Package
                         className="w-10 h-10 text-white p-2 bg-indigo-500 rounded-full
                                    transform transition-transform duration-300 hover:rotate-12" // Added hover rotation
-                        viewBox="0 0 24 24"
-                    >
-                        {/* Using a box icon for stock management */}
-                         <path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2zM12 20v-4m-4 4v-4m8 4v-4"></path>
-                    </svg>
+                    />
                     <span className="ml-3 text-xl">StockFlow</span> {/* Updated title */}
                 </Link>
 

@@ -8,11 +8,12 @@ import { Button } from "./components/button";
 // Import TotalSummary component
 import TotalSummary from "./pages/TotalSummary"; // Ensure this path is correct
 import { ChevronDown, ChevronUp, Download, AlertTriangle, BarChart as BarChartIcon } from "lucide-react"; // Added BarChartIcon for the button
-import { toast } from "sonner";
+import { toast } from 'sonner';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar
 } from 'recharts'; // Import Recharts components
+import { useRouter } from 'next/navigation'; // Import useRouter for redirection
 
 // IMPORTANT: If you encounter "Module not found: Can't resolve 'recharts'",
 // you need to install it in your project's terminal:
@@ -25,9 +26,8 @@ import { db, auth, initializeFirebaseAndAuth } from './lib/firebase';
 import { collection, onSnapshot, query, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// Import the new Login component
-
-import LogoutButton from './components/LogoutButton'; // Or integrate Logout directly into Header
+// Import LogoutButton component
+import LogoutButton from './components/LogoutButton'; 
 
 // Helper function to format date as DD-MM-YYYY
 function formatDate(date) {
@@ -102,6 +102,7 @@ export default function Home() {
   // Auth related states
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const router = useRouter(); // Initialize useRouter
 
   // Get the app ID, with a fallback for environments where it might not be defined
   const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -119,6 +120,10 @@ export default function Home() {
         setIsAuthReady(true); // Auth state has been determined
         setLoading(false); // Stop loading after auth state is determined
         console.log("Firebase: Auth state changed. User:", user ? user.uid : "No user");
+        // If user is NOT logged in, redirect to login page
+        if (!user) {
+            router.push('/login');
+        }
       });
 
       return () => {
@@ -128,7 +133,7 @@ export default function Home() {
     };
 
     setupFirebase();
-  }, []);
+  }, [router]); // Add router to dependency array
 
   // --- Data Loading Functions (dependent on currentUser) ---
   useEffect(() => {
@@ -791,12 +796,8 @@ export default function Home() {
     );
   }
 
-  // If user is not logged in, show the Login component
-  if (!currentUser) {
-    console.log("Rendering Login component as no current user.");
-    return <Login />;
-  }
-
+  // If user is not logged in, this component will not be rendered due to redirection
+  // This check is now primarily for when the user is logged in and data is loading
   if (error) {
     console.error("Dashboard error:", error);
     return (
@@ -806,7 +807,7 @@ export default function Home() {
     );
   }
 
-  // Render logic starts here
+  // Render logic starts here (only if authenticated)
   return (
     <div>
       <Header />
@@ -856,7 +857,7 @@ export default function Home() {
                 <BarChartIcon className="mr-2 h-4 w-4" /> View Analytics
             </Button>
             {/* Logout Button */}
-            
+            <LogoutButton />
           </div>
         </div>
 
@@ -1378,6 +1379,9 @@ export default function Home() {
               </tbody>
             </table>
           </div>
+
+          {/* Removed Pagination Controls from Dashboard */}
+          {/* Removed conditional messages related to sales search/filter */}
         </div>
 
 
@@ -1552,74 +1556,72 @@ export default function Home() {
           </div>
         </div>
       )}
-
+      {/* The style tag should be directly within the Fragment or the root div */}
       <style jsx>{`
-        /* Loader styles */
-        .loader {
-          border: 4px solid #f3f3f3; /* Light grey */
-          border-top: 4px solid #3498db; /* Blue */
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
+                .fade-in-backdrop {
+                    animation: fadeInBackdrop 0.3s ease-out forwards;
+                    opacity: 0;
+                }
+                @keyframes fadeInBackdrop {
+                    0% { opacity: 0; }
+                    100% { opacity: 1; }
+                }
 
-        @keyframes spin {
-          0% {
-            transform: rotate(0deg);
-          }
-          100% {
-            transform: rotate(360deg);
-          }
-        }
+                .animate-scale-in {
+                    animation: scaleIn 0.3s ease-out forwards;
+                }
+                @keyframes scaleIn {
+                    0% { transform: scale(0.95); opacity: 0; }
+                    100% { transform: scale(1); opacity: 1; }
+                }
 
-        /* Fade-in animation for the main content */
-        .fade-in {
-          animation: fadeIn 0.5s ease-out forwards;
-          opacity: 0; /* Start invisible */
-        }
+                .fade-in {
+                    animation: fadeIn 0.5s ease-out forwards;
+                    opacity: 0;
+                }
+                @keyframes fadeIn {
+                    0% { opacity: 0; transform: translateY(20px); }
+                    100% { opacity: 1; transform: translateY(0); }
+                }
 
-        @keyframes fadeIn {
-          0% {
-            opacity: 0;
-            transform: translateY(20px);
-          } /* Optional: slight slide up */
-          100% {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
+                /* Loader styles */
+                .loader {
+                    border: 4px solid #f3f3f3; /* Light grey */
+                    border-top: 4px solid #3498db; /* Blue */
+                    border-radius: 50%;
+                    width: 40px;
+                    height: 40px;
+                    animation: spin 1s linear infinite;
+                }
 
-        /* Slide animation for expandable row content */
-        .expandable-content {
-          overflow: hidden; /* Hide content when collapsed */
-          transition: max-height 0.3s ease-out; /* Smooth transition */
-          max-height: 0; /* Start collapsed */
-        }
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
 
-        /* This class is applied by React when the row is expanded */
-        tr.bg-indigo-50 + tr .expandable-content {
-          max-height: 1000px;
-        }
+                /* Fade-in animation for the main content */
+                .fade-in {
+                    animation: fadeIn 0.5s ease-out forwards;
+                    opacity: 0; /* Start invisible */
+                }
 
-        /* Modal specific styles */
-        .fade-in-backdrop {
-            animation: fadeInBackdrop 0.3s ease-out forwards;
-            opacity: 0;
-        }
-        @keyframes fadeInBackdrop {
-            0% { opacity: 0; }
-            100% { opacity: 1; }
-        }
+                @keyframes fadeIn {
+                    0% { opacity: 0; transform: translateY(20px); } /* Optional: slight slide up */
+                    100% { opacity: 1; transform: translateY(0); }\
+                }
 
-        .animate-scale-in {
-            animation: scaleIn 0.3s ease-out forwards;
-        }
-        @keyframes scaleIn {
-            0% { transform: scale(0.95); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-      `}</style>
+                /* Slide animation for expandable row content */
+                .expandable-content {
+                    overflow: hidden; /* Hide content when collapsed */
+                    transition: max-height 0.3s ease-out; /* Smooth transition */
+                    max-height: 0; /* Start collapsed */
+                }
+
+                /* This class is applied by React when the row is expanded */
+                tr.bg-indigo-50 + tr .expandable-content {
+                    max-height: 500px; /* A large enough value to accommodate the content */
+                }
+            `}</style>
     </div>
   );
 }
