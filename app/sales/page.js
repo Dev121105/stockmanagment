@@ -7,16 +7,15 @@ import { useRouter } from 'next/navigation';
 import Header from '../components/Header';
 import { toast } from 'sonner';
 import {
-    Trash2, Eye, Plus, X, Edit, Save, Share2, Printer, Search, RefreshCcw, AlertTriangle,
+    Trash2, Eye, Plus, X, Edit, Save, Search, RefreshCcw, AlertTriangle,
     ChevronDown, ChevronUp, ArrowDownUp, ChevronLeft, ChevronRight // Added missing icons for sorting and pagination
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 
 // Import Firebase services
 import { db, auth, initializeFirebaseAndAuth } from '../lib/firebase'; // Adjust path as needed
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged 
+} from 'firebase/auth';
 
 // Helper function to format date as DD-MM-YYYY
 function formatDate(date) {
@@ -111,6 +110,7 @@ const SalesPage = () => {
         hsn: '',
         schedule: '',
         barcode: '',
+        selectedPriceType: 'salePrice', // New state to track selected price type
     });
     const [editingSaleId, setEditingSaleId] = useState(null);
     const [expandedSaleId, setExpandedSaleId] = useState(null);
@@ -188,6 +188,7 @@ const SalesPage = () => {
                 mrp: Number(p.mrp) || 0,
                 salePrice: Number(p.salePrice) || 0,
                 quantity: Number(p.quantity) || 0,
+                packSize: Number(p.itemsPerPack) || 1, // FIX: Ensure packSize is set from p.itemsPerPack
             }));
             setProducts(processedProducts);
             setLoading(false); // Set loading to false once products are loaded
@@ -407,15 +408,40 @@ const SalesPage = () => {
         setCurrentSaleItem(prev => ({ ...prev, [name]: value }));
     };
 
+    // Handle change for price type selection (MRP vs Sale Price)
+    const handlePriceTypeChange = (e) => {
+        const { value } = e.target;
+        setCurrentSaleItem(prev => {
+            let newSalePrice = prev.salePrice; // Default to current salePrice
+            // Ensure we use the packSize that was set from itemsPerPack when the product was selected
+            const productPackSize = Number(prev.packSize) || 1; 
+            const mrpPerItem = (Number(prev.mrp) || 0) / productPackSize;
+            const initialSalePricePerItem = (Number(prev.initialSalePrice) || 0); // initialSalePrice is already per item
+
+            if (value === 'mrp') {
+                newSalePrice = mrpPerItem;
+            } else if (value === 'salePrice') {
+                newSalePrice = initialSalePricePerItem;
+            }
+            // If value is 'custom', newSalePrice remains prev.salePrice (user can type)
+
+            return {
+                ...prev,
+                selectedPriceType: value,
+                salePrice: newSalePrice,
+            };
+        });
+    };
+
     // When a product is selected from the search results
     const handleProductSelect = (product) => {
         // Find if a product with the same ID and batch exists in the current sale items
         const existingItemIndex = currentSale.items.findIndex(
-            (item) => item.productId === product.id && item.batch === currentSaleItem.batch
+            (item) => item.productId === product.id && item.batch === currentSaleItem.batch && item.expiry === currentSaleItem.expiry // FIX: Added expiry to uniqueness check
         );
 
         if (existingItemIndex !== -1) {
-            toast.warning(`Product "${product.name}" with Batch "${currentSaleItem.batch}" already exists in the current sale. Edit its quantity directly.`);
+            toast.warning(`Product "${product.name}" with Batch "${currentSaleItem.batch}" and Expiry "${currentSaleItem.expiry}" already exists in the current sale. Edit its quantity directly.`); // FIX: Updated toast message
             setSearchQuery(''); // Clear search to hide product list
             setIsProductListVisible(false);
             return;
@@ -440,6 +466,11 @@ const SalesPage = () => {
             });
         });
 
+        // Calculate MRP and Sale Price per individual item based on packSize (which is itemsPerPack from product master)
+        const productPackSize = Number(product.itemsPerPack) || 1; // Correctly get from product.itemsPerPack
+        const mrpPerItem = (Number(product.mrp) || 0) / productPackSize;
+        const salePricePerItem = (Number(product.salePrice) || Number(product.mrp) || 0) / productPackSize;
+
 
         // Initialize currentSaleItem with selected product details
         setCurrentSaleItem({
@@ -450,8 +481,9 @@ const SalesPage = () => {
             batch: latestBatch, // Auto-filled batch
             expiry: latestExpiry, // Auto-filled expiry
             quantity: 1, // Default to 1
-            mrp: Number(product.mrp) || 0,
-            salePrice: Number(product.salePrice) || Number(product.mrp) || 0, // Prefer salePrice, fallback to MRP
+            mrp: mrpPerItem, // Store MRP per item
+            salePrice: salePricePerItem, // Prefer salePrice per item, fallback to MRP per item
+            initialSalePrice: salePricePerItem, // Store initial sale price per item for toggling
             discount: Number(product.discount) || 0,
             taxRate: Number(product.taxRate) || 0,
             itemSubtotal: 0, // Will be calculated by useEffect
@@ -461,6 +493,8 @@ const SalesPage = () => {
             hsn: product.hsn || '',
             schedule: product.schedule || '',
             barcode: product.barcode || '',
+            selectedPriceType: 'salePrice', // Default to salePrice on selection
+            packSize: productPackSize, // Store packSize (which is itemsPerPack) for reference in currentSaleItem
         });
         setSearchQuery(product.name); // Keep selected product name in search bar
         setIsProductListVisible(false); // Hide the product list
@@ -505,7 +539,7 @@ const SalesPage = () => {
         setCurrentSaleItem({
             productId: '', productName: '', unit: '', category: '', batch: '', expiry: '', quantity: '', mrp: '',
             salePrice: '', discount: '', taxRate: '', itemSubtotal: 0, itemDiscountAmount: 0, itemTaxAmount: 0, itemTotal: 0,
-            hsn: '', schedule: '', barcode: '',
+            hsn: '', schedule: '', barcode: '', selectedPriceType: 'salePrice', packSize: 1,
         });
         setSearchQuery('');
         toast.success(`"${productName}" added to sale.`);
@@ -517,10 +551,36 @@ const SalesPage = () => {
             const updatedItems = [...prevSale.items];
             const itemToUpdate = { ...updatedItems[index] };
 
-            // Update the specific field
+            // Store original values for potential revert
+            const originalBatch = itemToUpdate.batch;
+            const originalExpiry = itemToUpdate.expiry;
+            const originalProductId = itemToUpdate.productId;
+
+            // Apply the change
             itemToUpdate[field] = value;
 
-            // Recalculate item totals based on updated values
+            // --- Key Uniqueness Check after potential change ---
+            const newKeyAttempt = `${itemToUpdate.productId}-${itemToUpdate.batch || 'no-batch'}-${itemToUpdate.expiry || 'no-expiry'}`;
+            const isDuplicateKey = updatedItems.some((item, i) => {
+                if (i === index) return false; // Don't compare with itself
+                const existingKey = `${item.productId}-${item.batch || 'no-batch'}-${item.expiry || 'no-expiry'}`;
+                return existingKey === newKeyAttempt;
+            });
+
+            if (isDuplicateKey) {
+                toast.error(`Combination of Product, Batch, and Expiry must be unique within the sale. Reverting "${field}" change.`);
+                // Revert the specific field that caused the duplicate
+                if (field === 'batch') itemToUpdate.batch = originalBatch;
+                if (field === 'expiry') itemToUpdate.expiry = originalExpiry;
+                // Note: productId should not typically be edited in this inline table
+                // If it were, similar revert logic would apply.
+                // We're reverting the field directly on itemToUpdate, then continuing
+                // so the rest of the calculations are still applied to the reverted value.
+            }
+            // --- End Key Uniqueness Check ---
+
+
+            // Recalculate item totals based on updated (or potentially reverted) values
             const quantity = Number(itemToUpdate.quantity) || 0;
             const salePrice = Number(itemToUpdate.salePrice) || 0;
             const discount = Number(itemToUpdate.discount) || 0;
@@ -541,7 +601,8 @@ const SalesPage = () => {
             const currentProductStock = calculateTotalStockForProduct(itemToUpdate.productName);
             // Sum of quantities for this product (and batch) from other items in the current sale (excluding the one being edited)
             const otherItemsQuantityInCurrentSale = updatedItems.reduce((sum, item, i) => {
-                return i !== index && item.productId === itemToUpdate.productId && item.batch === itemToUpdate.batch
+                // FIX: Ensure comparison also includes expiry for accurate stock check when editing
+                return i !== index && item.productId === itemToUpdate.productId && item.batch === itemToUpdate.batch && item.expiry === itemToUpdate.expiry
                     ? sum + Number(item.quantity)
                     : sum;
             }, 0);
@@ -659,6 +720,8 @@ const SalesPage = () => {
                 itemDiscountAmount: Number(item.itemDiscountAmount),
                 itemTaxAmount: Number(item.itemTaxAmount),
                 itemTotal: Number(item.itemTotal),
+                // Ensure packSize is saved with the item
+                packSize: Number(item.packSize) || 1,
             })),
         };
 
@@ -738,7 +801,7 @@ const SalesPage = () => {
         setCurrentSaleItem({
             productId: '', productName: '', unit: '', category: '', batch: '', expiry: '', quantity: '', mrp: '',
             salePrice: '', discount: '', taxRate: '', itemSubtotal: 0, itemDiscountAmount: 0, itemTaxAmount: 0, itemTotal: 0,
-            hsn: '', schedule: '', barcode: '',
+            hsn: '', schedule: '', barcode: '', selectedPriceType: 'salePrice', packSize: 1,
         });
         setSearchQuery('');
         setIsProductListVisible(false);
@@ -760,44 +823,6 @@ const SalesPage = () => {
         setIsViewModalOpen(false);
         setViewingSale(null);
     };
-
-    // PDF Generation
-    const generatePdf = useCallback(() => {
-        if (!viewingSale) return;
-
-        const input = viewModalRef.current;
-        if (!input) {
-            toast.error("Could not find modal content to generate PDF.");
-            return;
-        }
-
-        toast.info("Generating PDF, please wait...");
-
-        html2canvas(input, { scale: 2, useCORS: true, logging: true }).then((canvas) => {
-            const imgData = canvas.toDataURL('image/png');
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const imgWidth = 210; // A4 width in mm
-            const pageHeight = 297; // A4 height in mm
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-            let heightLeft = imgHeight;
-            let position = 0;
-
-            pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-            heightLeft -= pageHeight;
-
-            while (heightLeft >= 0) {
-                position = heightLeft - imgHeight;
-                pdf.addPage();
-                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                heightLeft -= pageHeight;
-            }
-            pdf.save(`Sale_Invoice_${viewingSale.customerName.replace(/\s/g, '_')}_${formatDate(viewingSale.saleDate)}.pdf`);
-            toast.success("PDF generated successfully!");
-        }).catch(error => {
-            console.error("Error generating PDF:", error);
-            toast.error("Failed to generate PDF. Please try again.");
-        });
-    }, [viewingSale]);
 
     // Memoized filtered and sorted sales for display
     const filteredAndSortedSales = useMemo(() => {
@@ -875,10 +900,7 @@ const SalesPage = () => {
             <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 bg-gray-100 rounded-lg shadow-inner fade-in">
                 <div className="flex justify-between items-center mb-8">
                     <h2 className="text-3xl font-bold text-gray-800">Sales</h2>
-                    <Button
-                        onClick={() => router.push('/')}
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                    >
+                    <Button onClick={() => router.push('/')} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200" >
                         Go to Dashboard
                     </Button>
                 </div>
@@ -898,27 +920,11 @@ const SalesPage = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                         <div>
                             <label htmlFor="customerName" className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
-                            <input
-                                type="text"
-                                id="customerName"
-                                name="customerName"
-                                value={currentSale.customerName}
-                                onChange={handleSaleChange}
-                                placeholder="Enter customer name"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            />
+                            <input type="text" id="customerName" name="customerName" value={currentSale.customerName} onChange={handleSaleChange} placeholder="Enter customer name" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                         </div>
                         <div>
                             <label htmlFor="saleDate" className="block text-sm font-medium text-gray-700 mb-1">Sale Date</label>
-                            <input
-                                type="text"
-                                id="saleDate"
-                                name="saleDate"
-                                value={currentSale.saleDate}
-                                onChange={handleSaleChange}
-                                placeholder="DD-MM-YYYY"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            />
+                            <input type="text" id="saleDate" name="saleDate" value={currentSale.saleDate} onChange={handleSaleChange} placeholder="DD-MM-YYYY" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                         </div>
                     </div>
 
@@ -938,7 +944,7 @@ const SalesPage = () => {
                                     setIsProductListVisible(true);
                                 }}
                                 onFocus={() => setIsProductListVisible(true)}
-                                onBlur={() => setTimeout(() => setIsProductListVisible(false), 200)} // Delay to allow click
+                                onBlur={() => setTimeout(() => setIsProductListVisible(false), 200)}
                                 placeholder="Search & Select Product"
                                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                                 ref={productSearchRef}
@@ -969,44 +975,62 @@ const SalesPage = () => {
                         </div>
                         <div>
                             <label htmlFor="batch" className="block text-sm font-medium text-gray-700 mb-1">Batch No.</label>
-                            <input
-                                type="text"
-                                id="batch"
-                                name="batch"
-                                value={currentSaleItem.batch}
-                                onChange={handleCurrentSaleItemChange}
-                                placeholder="e.g., B12345"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            />
+                            <input type="text" id="batch" name="batch" value={currentSaleItem.batch} onChange={handleCurrentSaleItemChange} placeholder="e.g., B12345" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                         </div>
                         <div>
                             <label htmlFor="expiry" className="block text-sm font-medium text-gray-700 mb-1">Expiry (MM-YYYY)</label>
-                            <input
-                                type="text"
-                                id="expiry"
-                                name="expiry"
-                                value={currentSaleItem.expiry}
-                                onChange={handleCurrentSaleItemChange}
-                                placeholder="e.g., 12-2025"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            />
+                            <input type="text" id="expiry" name="expiry" value={currentSaleItem.expiry} onChange={handleCurrentSaleItemChange} placeholder="e.g., 12-2025" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                         </div>
                         <div>
-                            <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-                            <input
-                                type="number"
-                                id="quantity"
-                                name="quantity"
-                                value={currentSaleItem.quantity}
-                                onChange={handleCurrentSaleItemChange}
-                                placeholder="e.g., 1"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                min="1"
-                            />
+                            <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">Quantity (Individual Items)</label>
+                            <input type="number" id="quantity" name="quantity" value={currentSaleItem.quantity} onChange={handleCurrentSaleItemChange} placeholder="e.g., 1" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" min="1" />
                         </div>
-                        {/* Sale Price input field for override/display */}
+
+                        {/* Price Type Selection and Sale Price input */}
                         <div>
-                            <label htmlFor="salePrice" className="block text-sm font-medium text-gray-700 mb-1">Sale Price / Pack</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Sale Price Type</label>
+                            <div className="flex items-center mt-1">
+                                <label htmlFor="priceTypeMRP" className="mr-4 flex items-center">
+                                    <input
+                                        type="radio"
+                                        id="priceTypeMRP"
+                                        name="selectedPriceType"
+                                        value="mrp"
+                                        checked={currentSaleItem.selectedPriceType === 'mrp'}
+                                        onChange={handlePriceTypeChange}
+                                        className="form-radio h-4 w-4 text-indigo-600 transition duration-150 ease-in-out"
+                                    />
+                                    <span className="ml-2 text-sm text-gray-700">MRP ({(Number(currentSaleItem.mrp) || 0).toFixed(2)})</span>
+                                </label>
+                                <label htmlFor="priceTypeSalePrice" className="mr-4 flex items-center">
+                                    <input
+                                        type="radio"
+                                        id="priceTypeSalePrice"
+                                        name="selectedPriceType"
+                                        value="salePrice"
+                                        checked={currentSaleItem.selectedPriceType === 'salePrice'}
+                                        onChange={handlePriceTypeChange}
+                                        className="form-radio h-4 w-4 text-indigo-600 transition duration-150 ease-in-out"
+                                    />
+                                    <span className="ml-2 text-sm text-gray-700">Sale Price ({(Number(currentSaleItem.initialSalePrice) || 0).toFixed(2)})</span>
+                                </label>
+                                <label htmlFor="priceTypeCustom" className="flex items-center">
+                                    <input
+                                        type="radio"
+                                        id="priceTypeCustom"
+                                        name="selectedPriceType"
+                                        value="custom"
+                                        checked={currentSaleItem.selectedPriceType === 'custom'}
+                                        onChange={handlePriceTypeChange}
+                                        className="form-radio h-4 w-4 text-indigo-600 transition duration-150 ease-in-out"
+                                    />
+                                    <span className="ml-2 text-sm text-gray-700">Custom Price</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label htmlFor="salePrice" className="block text-sm font-medium text-gray-700 mb-1">Sale Price / Item</label>
                             <input
                                 type="number"
                                 id="salePrice"
@@ -1017,55 +1041,25 @@ const SalesPage = () => {
                                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                                 step="0.01"
                                 min="0"
+                                readOnly={currentSaleItem.selectedPriceType !== 'custom'} // Make read-only if not custom
                             />
                         </div>
+
                         <div>
                             <label htmlFor="discount" className="block text-sm font-medium text-gray-700 mb-1">Discount (%)</label>
-                            <input
-                                type="number"
-                                id="discount"
-                                name="discount"
-                                value={currentSaleItem.discount}
-                                onChange={handleCurrentSaleItemChange}
-                                placeholder="e.g., 10"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                step="0.01"
-                                min="0"
-                                max="100"
-                            />
+                            <input type="number" id="discount" name="discount" value={currentSaleItem.discount} onChange={handleCurrentSaleItemChange} placeholder="e.g., 10" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" step="0.01" min="0" max="100" />
                         </div>
                         <div>
                             <label htmlFor="taxRate" className="block text-sm font-medium text-gray-700 mb-1">Tax Rate (%)</label>
-                            <input
-                                type="number"
-                                id="taxRate"
-                                name="taxRate"
-                                value={currentSaleItem.taxRate}
-                                onChange={handleCurrentSaleItemChange}
-                                placeholder="e.g., 18"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                step="0.01"
-                                min="0"
-                                max="100"
-                            />
+                            <input type="number" id="taxRate" name="taxRate" value={currentSaleItem.taxRate} onChange={handleCurrentSaleItemChange} placeholder="e.g., 18" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" step="0.01" min="0" max="100" />
                         </div>
                         <div className="col-span-full md:col-span-1 lg:col-span-1">
                             <label htmlFor="itemTotal" className="block text-sm font-medium text-gray-700 mb-1">Item Total</label>
-                            <input
-                                type="text"
-                                id="itemTotal"
-                                name="itemTotal"
-                                value={`₹${currentSaleItem.itemTotal.toFixed(2)}`}
-                                readOnly
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 sm:text-sm"
-                            />
+                            <input type="text" id="itemTotal" name="itemTotal" value={`₹${(Number(currentSaleItem.itemTotal) || 0).toFixed(2)}`} readOnly className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 sm:text-sm" />
                         </div>
                     </div>
                     <div className="flex justify-end">
-                        <Button
-                            onClick={handleAddItemToSale}
-                            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
-                        >
+                        <Button onClick={handleAddItemToSale} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200" >
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </div>
@@ -1074,87 +1068,51 @@ const SalesPage = () => {
                     {currentSale.items.length > 0 && (
                         <div className="mt-6">
                             <h4 className="text-xl font-semibold text-gray-700 mb-3">Items in Current Sale</h4>
-                            <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm mb-4">
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry (MM-YYYY)</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale Price</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disc (%)</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tax (%)</th>
-                                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
-                                            <th className="px-3 py-3"></th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale Price</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discount (%)</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tax (%)</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
                                         {currentSale.items.map((item, index) => (
-                                            <tr key={index}>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{item.productName} ({item.unit})</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.batch}</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
-                                                    <input
-                                                        type="text"
-                                                        value={item.expiry}
-                                                        onChange={(e) => handleEditCurrentSaleItem(index, 'expiry', e.target.value)}
-                                                        className="w-24 border border-gray-300 rounded-md shadow-sm py-1 px-2 text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                                        placeholder="MM-YYYY"
-                                                    />
+                                            <tr key={`${item.productId}-${item.batch || 'no-batch'}-${item.expiry || 'no-expiry'}`} className="hover:bg-gray-50">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.productName}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="text" value={item.batch} onChange={(e) => handleEditCurrentSaleItem(index, 'batch', e.target.value)} className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm" />
                                                 </td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
-                                                    <input
-                                                        type="number"
-                                                        value={item.quantity}
-                                                        onChange={(e) => handleEditCurrentSaleItem(index, 'quantity', e.target.value)}
-                                                        className="w-20 border border-gray-300 rounded-md shadow-sm py-1 px-2 text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                                        min="1"
-                                                    />
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="text" value={item.expiry} onChange={(e) => handleEditCurrentSaleItem(index, 'expiry', e.target.value)} className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm" placeholder="MM-YYYY" />
                                                 </td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.mrp).toFixed(2)}</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
-                                                    <input
-                                                        type="number"
-                                                        value={item.salePrice}
-                                                        onChange={(e) => handleEditCurrentSaleItem(index, 'salePrice', e.target.value)}
-                                                        className="w-24 border border-gray-300 rounded-md shadow-sm py-1 px-2 text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                                        step="0.01"
-                                                        min="0"
-                                                    />
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="number" value={item.quantity} onChange={(e) => handleEditCurrentSaleItem(index, 'quantity', e.target.value)} className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm" min="1" />
                                                 </td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
-                                                    <input
-                                                        type="number"
-                                                        value={item.discount}
-                                                        onChange={(e) => handleEditCurrentSaleItem(index, 'discount', e.target.value)}
-                                                        className="w-20 border border-gray-300 rounded-md shadow-sm py-1 px-2 text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                                        step="0.01"
-                                                        min="0"
-                                                        max="100"
-                                                    />%
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="number" value={(Number(item.mrp) || 0).toFixed(2)} onChange={(e) => handleEditCurrentSaleItem(index, 'mrp', e.target.value)} className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm" step="0.01" min="0" />
                                                 </td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
-                                                    <input
-                                                        type="number"
-                                                        value={item.taxRate}
-                                                        onChange={(e) => handleEditCurrentSaleItem(index, 'taxRate', e.target.value)}
-                                                        className="w-20 border border-gray-300 rounded-md shadow-sm py-1 px-2 text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                                        step="0.01"
-                                                        min="0"
-                                                        max="100"
-                                                    />%
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="number" value={(Number(item.salePrice) || 0).toFixed(2)} onChange={(e) => handleEditCurrentSaleItem(index, 'salePrice', e.target.value)} className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm" step="0.01" min="0" />
                                                 </td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.itemTotal).toFixed(2)}</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
-                                                    <Button
-                                                        size="sm"
-                                                        onClick={() => handleRemoveItem(index)}
-                                                        className="p-2 rounded-full bg-red-100 hover:bg-red-200 text-red-700 transition-colors duration-200"
-                                                        title="Remove Item"
-                                                    >
-                                                        <X className="h-4 w-4" />
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="number" value={item.discount} onChange={(e) => handleEditCurrentSaleItem(index, 'discount', e.target.value)} className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm" step="0.01" min="0" max="100" />
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <input type="number" value={item.taxRate} onChange={(e) => handleEditCurrentSaleItem(index, 'taxRate', e.target.value)} className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm" step="0.01" min="0" max="100" />
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(item.itemTotal) || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                    <Button onClick={() => handleRemoveItem(index)} className="text-red-600 hover:text-red-900 bg-transparent hover:bg-red-50 p-1 rounded-md transition-colors duration-200">
+                                                        <X className="h-5 w-5" />
                                                     </Button>
                                                 </td>
                                             </tr>
@@ -1165,441 +1123,266 @@ const SalesPage = () => {
                         </div>
                     )}
 
-                    {/* Sale Totals */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                        <div>
-                            <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                            <select
-                                id="paymentMethod"
-                                name="paymentMethod"
-                                value={currentSale.paymentMethod}
-                                onChange={handleSaleChange}
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            >
-                                <option value="Cash">Cash</option>
-                                <option value="Card">Card</option>
-                                <option value="UPI">UPI</option>
-                                <option value="Bank Transfer">Bank Transfer</option>
-                            </select>
+                    {/* Totals Section */}
+                    <div className="mt-6 border-t pt-4 border-gray-200">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                            <div>
+                                <label htmlFor="subTotal" className="block text-sm font-medium text-gray-700 mb-1">Sub Total</label>
+                                <input type="text" id="subTotal" value={`₹${(Number(currentSale.subTotal) || 0).toFixed(2)}`} readOnly className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 sm:text-sm" />
+                            </div>
+                            <div>
+                                <label htmlFor="totalDiscount" className="block text-sm font-medium text-gray-700 mb-1">Total Discount</label>
+                                <input type="text" id="totalDiscount" value={`₹${(Number(currentSale.totalDiscount) || 0).toFixed(2)}`} readOnly className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 sm:text-sm" />
+                            </div>
+                            <div>
+                                <label htmlFor="totalTax" className="block text-sm font-medium text-gray-700 mb-1">Total Tax</label>
+                                <input type="text" id="totalTax" value={`₹${(Number(currentSale.totalTax) || 0).toFixed(2)}`} readOnly className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 sm:text-sm" />
+                            </div>
+                            <div>
+                                <label htmlFor="grandTotal" className="block text-sm font-medium text-gray-700 mb-1">Grand Total</label>
+                                <input type="text" id="grandTotal" value={`₹${(Number(currentSale.grandTotal) || 0).toFixed(2)}`} readOnly className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-indigo-50 text-indigo-900 font-bold sm:text-sm" />
+                            </div>
                         </div>
-                        <div>
-                            <label htmlFor="paidAmount" className="block text-sm font-medium text-gray-700 mb-1">Paid Amount</label>
-                            <input
-                                type="number"
-                                id="paidAmount"
-                                name="paidAmount"
-                                value={currentSale.paidAmount}
-                                onChange={handleSaleChange}
-                                placeholder="e.g., 1000.00"
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                step="0.01"
-                                min="0"
-                            />
-                        </div>
-                        <div className="col-span-full">
-                            <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
-                            <textarea
-                                id="notes"
-                                name="notes"
-                                value={currentSale.notes}
-                                onChange={handleSaleChange}
-                                rows="2"
-                                placeholder="Any additional notes for this sale..."
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            ></textarea>
-                        </div>
-                    </div>
 
-                    <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800">
-                        <div className="flex justify-between items-center py-1">
-                            <span className="font-medium">Subtotal:</span>
-                            <span>₹{currentSale.subTotal.toFixed(2)}</span>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div>
+                                <label htmlFor="paidAmount" className="block text-sm font-medium text-gray-700 mb-1">Paid Amount</label>
+                                <input type="number" id="paidAmount" name="paidAmount" value={currentSale.paidAmount} onChange={handleSaleChange} placeholder="e.g., 500.00" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" step="0.01" min="0" />
+                            </div>
+                            <div>
+                                <label htmlFor="balanceAmount" className="block text-sm font-medium text-gray-700 mb-1">Balance Amount</label>
+                                <input type="text" id="balanceAmount" value={`₹${(Number(currentSale.balanceAmount) || 0).toFixed(2)}`} readOnly className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 sm:text-sm" />
+                            </div>
+                            <div>
+                                <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+                                <select id="paymentMethod" name="paymentMethod" value={currentSale.paymentMethod} onChange={handleSaleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                    <option value="Cash">Cash</option>
+                                    <option value="Credit Card">Credit Card</option>
+                                    <option value="UPI">UPI</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                                <textarea id="notes" name="notes" value={currentSale.notes} onChange={handleSaleChange} rows="1" placeholder="Add any notes here" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
+                            </div>
                         </div>
-                        <div className="flex justify-between items-center py-1">
-                            <span className="font-medium">Total Discount:</span>
-                            <span>- ₹{currentSale.totalDiscount.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center py-1">
-                            <span className="font-medium">Total Tax:</span>
-                            <span>+ ₹{currentSale.totalTax.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center py-2 border-t border-blue-300 mt-2 text-lg font-bold">
-                            <span>Grand Total:</span>
-                            <span>₹{currentSale.grandTotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center py-1 text-base">
-                            <span className="font-medium">Paid Amount:</span>
-                            <span>₹{Number(currentSale.paidAmount).toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center py-1 text-base">
-                            <span className={currentSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
-                                Balance Amount:
-                            </span>
-                            <span className={currentSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
-                                ₹{currentSale.balanceAmount.toFixed(2)}
-                            </span>
-                        </div>
-                    </div>
 
-                    <div className="mt-6 flex justify-end space-x-3">
-                        <Button
-                            onClick={handleClearSale}
-                            className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                        >
-                            <RefreshCcw className="mr-2 h-4 w-4" /> Clear Sale
-                        </Button>
-                        <Button
-                            onClick={handleSaveSale}
-                            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                        >
-                            <Save className="mr-2 h-4 w-4" /> {editingSaleId ? 'Update Sale' : 'Save Sale'}
-                        </Button>
+                        <div className="flex justify-end space-x-3">
+                            <Button onClick={handleClearSale} className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
+                                <RefreshCcw className="mr-2 h-4 w-4" /> Clear
+                            </Button>
+                            <Button onClick={handleSaveSale} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
+                                <Save className="mr-2 h-4 w-4" /> {editingSaleId ? 'Update Sale' : 'Save Sale'}
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
                 {/* Sales List */}
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-2xl font-semibold text-gray-700">Recent Sales</h3>
-                        <div className="relative">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <Search className="h-5 w-5 text-gray-400" />
-                            </div>
-                            <input
-                                type="text"
-                                placeholder="Search sales..."
-                                value={searchQuery}
-                                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm w-full md:w-64"
-                            />
-                        </div>
+                    <h3 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">Existing Sales</h3>
+                    <div className="mb-4 flex justify-between items-center">
+                        <input
+                            type="text"
+                            placeholder="Search sales by customer or product name..."
+                            value={searchQuery}
+                            onChange={(e) => {
+                                setSearchQuery(e.target.value);
+                                setCurrentPage(1); // Reset to first page on search
+                            }}
+                            className="max-w-xs block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                        />
+                        <Search className="h-5 w-5 text-gray-400 -ml-8" />
                     </div>
 
-                    <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
+                    <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th
-                                        scope="col"
-                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
-                                        onClick={() => handleSort('customerName')}
-                                    >
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('customerName')}>
                                         Customer Name
-                                        {sortColumn === 'customerName' && (
-                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
-                                        )}
+                                        {sortColumn === 'customerName' && (sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />)}
                                     </th>
-                                    <th
-                                        scope="col"
-                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
-                                        onClick={() => handleSort('saleDate')}
-                                    >
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('saleDate')}>
                                         Sale Date
-                                        {sortColumn === 'saleDate' && (
-                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
-                                        )}
+                                        {sortColumn === 'saleDate' && (sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />)}
                                     </th>
-                                    <th
-                                        scope="col"
-                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
-                                        onClick={() => handleSort('grandTotal')}
-                                    >
-                                        Grand Total
-                                        {sortColumn === 'grandTotal' && (
-                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
-                                        )}
-                                    </th>
-                                    <th
-                                        scope="col"
-                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
-                                        onClick={() => handleSort('paidAmount')}
-                                    >
-                                        Paid
-                                        {sortColumn === 'paidAmount' && (
-                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
-                                        )}
-                                    </th>
-                                    <th
-                                        scope="col"
-                                        className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 transition-colors duration-150"
-                                        onClick={() => handleSort('balanceAmount')}
-                                    >
-                                        Balance
-                                        {sortColumn === 'balanceAmount' && (
-                                            sortDirection === 'asc' ? <ArrowDownUp className="inline ml-1 h-3 w-3" /> : <ArrowDownUp className="inline ml-1 h-3 w-3 rotate-180" />
-                                        )}
-                                    </th>
-                                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Actions
-                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Items</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grand Total</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Amount</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {currentFilteredAndSortedSales.length > 0 ? (
+                                {currentFilteredAndSortedSales.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="8" className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
+                                            No sales found.
+                                        </td>
+                                    </tr>
+                                ) : (
                                     currentFilteredAndSortedSales.map((sale) => (
                                         <React.Fragment key={sale.id}>
-                                            <tr className="hover:bg-gray-100 transition duration-100 ease-in-out">
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{sale.customerName}</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{sale.saleDate}</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{sale.grandTotal.toFixed(2)}</td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(sale.paidAmount).toFixed(2)}</td>
-                                                <td className={`px-3 py-2 whitespace-nowrap text-sm ${sale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                                    ₹{sale.balanceAmount.toFixed(2)}
-                                                </td>
-                                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium">
-                                                    <div className="flex items-center space-x-2">
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => handleViewSale(sale)}
-                                                            className="p-2 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors duration-200"
-                                                            title="View Sale Details"
-                                                        >
-                                                            <Eye className="h-4 w-4" />
+                                            <tr className="hover:bg-indigo-50 transition-colors duration-150 ease-in-out cursor-pointer" onClick={() => toggleExpansion(sale.id)}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sale.customerName}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{sale.saleDate}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{sale.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(sale.grandTotal) || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(sale.paidAmount) || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(sale.balanceAmount) || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                    <div className="flex justify-end space-x-2">
+                                                        <Button onClick={(e) => { e.stopPropagation(); if (sale.id) handleViewSale(sale); else toast.error('Sale ID is missing for this entry.'); }} className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 p-1 rounded-md transition-colors duration-200">
+                                                            <Eye className="h-5 w-5" />
                                                         </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => handleEditSale(sale)}
-                                                            className="p-2 rounded-full bg-yellow-100 hover:bg-yellow-200 text-yellow-700 transition-colors duration-200"
-                                                            title="Edit Sale"
-                                                        >
-                                                            <Edit className="h-4 w-4" />
+                                                        <Button onClick={(e) => { e.stopPropagation(); if (sale.id) handleEditSale(sale); else toast.error('Sale ID is missing for this entry.'); }} className="text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 p-1 rounded-md transition-colors duration-200">
+                                                            <Edit className="h-5 w-5" />
                                                         </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => handleDeleteSale(sale.id)}
-                                                            className="p-2 rounded-full bg-red-100 hover:bg-red-200 text-red-700 transition-colors duration-200"
-                                                            title="Delete Sale"
-                                                        >
-                                                            <Trash2 className="h-4 w-4" />
+                                                        <Button onClick={(e) => { e.stopPropagation(); if (sale.id) handleDeleteSale(sale.id); else toast.error('Sale ID is missing for this entry.'); }} className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-1 rounded-md transition-colors duration-200">
+                                                            <Trash2 className="h-5 w-5" />
                                                         </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => toggleExpansion(sale.id)}
-                                                            className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors duration-200"
-                                                            title={expandedSaleId === sale.id ? "Collapse Details" : "Expand Details"}
-                                                        >
-                                                            {expandedSaleId === sale.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                        <Button onClick={(e) => { e.stopPropagation(); toggleExpansion(sale.id); }} className="text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 p-1 rounded-md transition-colors duration-200">
+                                                            {expandedSaleId === sale.id ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                                                         </Button>
                                                     </div>
                                                 </td>
                                             </tr>
                                             {expandedSaleId === sale.id && (
-                                                <tr className="bg-indigo-50 fade-in-item">
-                                                    <td colSpan="7" className="px-3 py-2">
-                                                        <div className="expandable-content p-2">
-                                                            <h5 className="font-semibold text-indigo-800 mb-2">Items:</h5>
+                                                <tr className="bg-indigo-50">
+                                                    <td colSpan="8" className="px-6 py-4">
+                                                        <div className="expandable-content transition-all duration-300 ease-out max-h-500 overflow-hidden">
+                                                            <h5 className="text-lg font-semibold text-indigo-800 mb-2">Sale Details for {sale.customerName}</h5>
                                                             <ul className="list-disc list-inside text-sm text-indigo-700">
-                                                                {sale.items.map((item, itemIndex) => (
-                                                                    <li key={itemIndex}>
-                                                                        {item.productName} ({item.unit}) - Batch: {item.batch}, Expiry: {item.expiry}, Qty: {item.quantity}, Price: ₹{Number(item.salePrice).toFixed(2)}, Total: ₹{Number(item.itemTotal).toFixed(2)}
+                                                                {sale.items.map((item) => ( // Removed itemIndex from here, as it's not needed for the key
+                                                                    <li key={`${item.productId}-${item.batch || 'no-batch'}-${item.expiry || 'no-expiry'}`} className="mb-1">
+                                                                        {item.productName} (Qty: {item.quantity}, Price: ₹{(Number(item.salePrice) || 0).toFixed(2)}, Disc: {(Number(item.discount) || 0).toFixed(2)}%, Tax: {(Number(item.taxRate) || 0).toFixed(2)}%, Total: ₹{(Number(item.itemTotal) || 0).toFixed(2)})
+                                                                        {item.batch && ` - Batch: ${item.batch}`}
+                                                                        {item.expiry && ` (Expiry: ${item.expiry})`}
                                                                     </li>
                                                                 ))}
                                                             </ul>
-                                                            <p className="text-sm text-indigo-700 mt-2">
-                                                                <span className="font-semibold">Payment Method:</span> {sale.paymentMethod}
-                                                            </p>
                                                             {sale.notes && (
-                                                                <p className="text-sm text-indigo-700 mt-1">
-                                                                    <span className="font-semibold">Notes:</span> {sale.notes}
-                                                                </p>
+                                                                <p className="text-sm text-indigo-700 mt-2"><strong>Notes:</strong> {sale.notes}</p>
                                                             )}
+                                                            <p className="text-sm text-indigo-700 mt-2"><strong>Payment Method:</strong> {sale.paymentMethod || 'N/A'}</p>
                                                         </div>
                                                     </td>
                                                 </tr>
                                             )}
                                         </React.Fragment>
                                     ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan="7" className="px-3 py-4 text-center text-sm text-gray-500">
-                                            {searchQuery ? "No sales match your search." : "No sales recorded yet."}
-                                        </td>
-                                    </tr>
                                 )}
                             </tbody>
                         </table>
                     </div>
 
                     {/* Pagination Controls */}
-                    <div className="mt-4 flex justify-between items-center">
-                        <Button
-                            onClick={() => paginate(currentPage - 1)}
-                            disabled={currentPage === 1}
-                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-                        </Button>
-                        <span className="text-sm text-gray-700">
-                            Page {currentPage} of {totalPages}
-                        </span>
-                        <Button
-                            onClick={() => paginate(currentPage + 1)}
-                            disabled={currentPage === totalPages || totalPages === 0}
-                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Next <ChevronRight className="h-4 w-4 ml-1" />
-                        </Button>
-                    </div>
-
-                    {currentFilteredAndSortedSales.length === 0 && sales.length > 0 && searchQuery && (
-                        <p className="text-center text-gray-500 mt-4">No sales match your current search query.</p>
-                    )}
-                    {currentFilteredAndSortedSales.length === 0 && sales.length > 0 && !searchQuery && (
-                        <p className="text-center text-gray-500 mt-4">No sales available after filtering/sorting.</p>
+                    {totalPages > 1 && (
+                        <nav className="mt-4 flex justify-center" aria-label="Pagination">
+                            <ul className="flex items-center -space-x-px h-10 text-base">
+                                <li>
+                                    <Button
+                                        onClick={() => paginate(currentPage - 1)}
+                                        disabled={currentPage === 1}
+                                        className="flex items-center justify-center px-4 h-10 ml-0 leading-tight text-gray-500 bg-white border border-gray-300 rounded-l-lg hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <ChevronLeft className="h-4 w-4" /> Previous
+                                    </Button>
+                                </li>
+                                {[...Array(totalPages)].map((_, index) => (
+                                    <li key={index}>
+                                        <Button
+                                            onClick={() => paginate(index + 1)}
+                                            className={`flex items-center justify-center px-4 h-10 leading-tight border border-gray-300 hover:bg-gray-100 hover:text-gray-700 ${currentPage === index + 1 ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100' : 'text-gray-500 bg-white'}`}
+                                        >
+                                            {index + 1}
+                                        </Button>
+                                    </li>
+                                ))}
+                                <li>
+                                    <Button
+                                        onClick={() => paginate(currentPage + 1)}
+                                        disabled={currentPage === totalPages}
+                                        className="flex items-center justify-center px-4 h-10 leading-tight text-gray-500 bg-white border border-gray-300 rounded-r-lg hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Next <ChevronRight className="h-4 w-4" />
+                                    </Button>
+                                </li>
+                            </ul>
+                        </nav>
                     )}
                 </div>
             </div>
 
             {/* View Sale Modal */}
             {isViewModalOpen && viewingSale && (
-                <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 fade-in-backdrop">
-                    <div ref={viewModalRef} className="bg-white p-6 rounded-lg shadow-xl w-11/12 md:w-3/4 lg:w-2/3 max-h-[90vh] overflow-y-auto animate-scale-in">
-                        <div className="flex justify-between items-center border-b pb-3 mb-4">
-                            <h3 className="text-2xl font-bold text-gray-800">Sale Details</h3>
-                            <Button
-                                onClick={handleCloseViewModal}
-                                className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
-                            >
-                                <X className="h-5 w-5 text-gray-600" />
-                            </Button>
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center">
+                    <div className="relative p-8 bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4" ref={viewModalRef}>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Sale Details</h3>
+                        <div className="mb-4">
+                            <p className="text-lg font-semibold text-gray-700">Customer: <span className="font-normal">{viewingSale.customerName || 'N/A'}</span></p>
+                            <p className="text-lg font-semibold text-gray-700">Date: <span className="font-normal">{viewingSale.saleDate || 'N/A'}</span></p>
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 text-gray-700">
-                            <div>
-                                <p className="font-semibold">Customer Name:</p>
-                                <p>{viewingSale.customerName}</p>
-                            </div>
-                            <div>
-                                <p className="font-semibold">Sale Date:</p>
-                                <p>{viewingSale.saleDate}</p>
-                            </div>
-                            <div>
-                                <p className="font-semibold">Payment Method:</p>
-                                <p>{viewingSale.paymentMethod}</p>
-                            </div>
-                            {viewingSale.notes && (
-                                <div>
-                                    <p className="font-semibold">Notes:</p>
-                                    <p>{viewingSale.notes}</p>
-                                </div>
-                            )}
-                        </div>
-
-                        <h4 className="text-xl font-semibold text-gray-700 mb-3 border-b pb-2 border-gray-200">Items Sold</h4>
-                        <div className="overflow-x-auto mb-4 border border-gray-200 rounded-md">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale Price</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disc (%)</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tax (%)</th>
-                                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                    {viewingSale.items.map((item, index) => (
-                                        <tr key={index}>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{item.productName} ({item.unit})</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.batch}</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.expiry}</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{item.quantity}</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.salePrice).toFixed(2)}</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{Number(item.discount).toFixed(2)}%</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">{Number(item.taxRate).toFixed(2)}%</td>
-                                            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">₹{Number(item.itemTotal).toFixed(2)}</td>
+                        <div className="mb-6">
+                            <h4 className="text-xl font-semibold text-gray-700 mb-2">Items Sold:</h4>
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MRP</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale Price</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disc (%)</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tax (%)</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Total</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800">
-                            <div className="flex justify-between items-center py-1">
-                                <span className="font-medium">Subtotal:</span>
-                                <span>₹{viewingSale.subTotal.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-1">
-                                <span className="font-medium">Total Discount:</span>
-                                <span>- ₹{viewingSale.totalDiscount.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-1">
-                                <span className="font-medium">Total Tax:</span>
-                                <span>+ ₹{viewingSale.totalTax.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-2 border-t border-blue-300 mt-2 text-lg font-bold">
-                                <span>Grand Total:</span>
-                                <span>₹{viewingSale.grandTotal.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-1 text-base">
-                                <span className="font-medium">Paid Amount:</span>
-                                <span>₹{Number(viewingSale.paidAmount).toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-1 text-base">
-                                <span className={viewingSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
-                                    Balance Amount:
-                                </span>
-                                <span className={viewingSale.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>
-                                    ₹{viewingSale.balanceAmount.toFixed(2)}
-                                </span>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                        {viewingSale.items.map((item) => (
+                                            <tr key={`${item.productId}-${item.batch || 'no-batch'}-${item.expiry || 'no-expiry'}`}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.productName}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.batch}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.expiry}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.quantity}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(item.mrp) || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(item.salePrice) || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{(Number(item.discount) || 0).toFixed(2)}%</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{(Number(item.taxRate) || 0).toFixed(2)}%</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹{(Number(item.itemTotal) || 0).toFixed(2)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-700 mb-6">
+                            <p><span className="font-semibold">Sub Total:</span> ₹{(Number(viewingSale.subTotal) || 0).toFixed(2)}</p>
+                            <p><span className="font-semibold">Total Discount:</span> ₹{(Number(viewingSale.totalDiscount) || 0).toFixed(2)}</p>
+                            <p><span className="font-semibold">Total Tax:</span> ₹{(Number(viewingSale.totalTax) || 0).toFixed(2)}</p>
+                            <p className="text-lg font-bold">Grand Total: ₹{(Number(viewingSale.grandTotal) || 0).toFixed(2)}</p>
+                            <p><span className="font-semibold">Paid Amount:</span> ₹{(Number(viewingSale.paidAmount) || 0).toFixed(2)}</p>
+                            <p><span className="font-semibold">Balance Amount:</span> ₹{(Number(viewingSale.balanceAmount) || 0).toFixed(2)}</p>
+                            <p><span className="font-semibold">Payment Method:</span> {viewingSale.paymentMethod || 'N/A'}</p>
+                            {viewingSale.notes && <p className="col-span-2"><span className="font-semibold">Notes:</span> {viewingSale.notes}</p>}
+                        </div>
 
-                        <div className="mt-6 flex justify-end space-x-3">
-                            <Button
-                                onClick={generatePdf}
-                                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                            >
-                                <Printer className="mr-2 h-4 w-4" /> Print/Download Bill
+                        <div className="flex justify-end space-x-3">
+                            <Button onClick={handleCloseViewModal} className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
+                                Close
                             </Button>
-                            {/* You might want to add a "Send Bill" functionality here */}
-                            <div className="hidden"> {/* Placeholder for Send Bill functionality */}
-                                <Button
-                                    onClick={() => toast.info('Send Bill functionality coming soon!')}
-                                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                                >
-                                    <Share2 className="mr-2 h-4 w-4" /> Send Bill
-                                </Button>
-                            </div>
                         </div>
                     </div>
                 </div>
             )}
-            {/* The style tag should be directly within the Fragment or the root div */}
             <style jsx>{`
-                .fade-in-backdrop {
-                    animation: fadeInBackdrop 0.3s ease-out forwards;
-                    opacity: 0;
-                }
-                @keyframes fadeInBackdrop {
-                    0% { opacity: 0; }
-                    100% { opacity: 1; }
-                }
-
-                .animate-scale-in {
-                    animation: scaleIn 0.3s ease-out forwards;
-                }
-                @keyframes scaleIn {
-                    0% { transform: scale(0.95); opacity: 0; }
-                    100% { transform: scale(1); opacity: 1; }
-                }
-
-                .fade-in {
-                    animation: fadeIn 0.5s ease-out forwards;
-                    opacity: 0;
-                }
-                @keyframes fadeIn {
-                    0% { opacity: 0; transform: translateY(20px); }
-                    100% { opacity: 1; transform: translateY(0); }
-                }
-
-                /* Loader styles */
                 .loader {
                     border: 4px solid #f3f3f3; /* Light grey */
-                    border-top: 4px solid #3498db; /* Blue */
+                    border-top: 44px solid #3498db; /* Blue */
                     border-radius: 50%;
                     width: 40px;
                     height: 40px;
@@ -1619,7 +1402,7 @@ const SalesPage = () => {
 
                 @keyframes fadeIn {
                     0% { opacity: 0; transform: translateY(20px); } /* Optional: slight slide up */
-                    100% { opacity: 1; transform: translateY(0); }\
+                    100% { opacity: 1; transform: translateY(0); }
                 }
 
                 /* Slide animation for expandable row content */

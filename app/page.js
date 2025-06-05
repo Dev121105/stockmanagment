@@ -161,7 +161,7 @@ export default function Home() {
               ...p,
               mrp: Number(p.mrp) || 0,
               originalMrp: Number(p.originalMrp) || 0,
-              itemsPerPack: Number(p.itemsPerPack) || 1,
+              itemsPerPack: Number(p.itemsPerPack) || 1, // Ensure this is a number and defaults to 1
               minStock: Number(p.minStock) || 0,
               maxStock: Number(p.maxStock) || 0,
               discount: Number(p.discount) || 0,
@@ -416,7 +416,14 @@ export default function Home() {
   const totalStockValue = useMemo(() => {
     console.log("Dashboard useMemo: Calculating total stock value...");
     return productsWithCalculatedStock.reduce(
-      (total, product) => total + (Number(product.quantity) * Number(product.mrp) || 0),
+      (total, product) => {
+        // Ensure itemsPerPack is a number and defaults to 1 to prevent division by zero
+        const itemsPerPack = Number(product.itemsPerPack) || 1; 
+        // Calculate the number of full or partial packs
+        const numberOfPacks = product.quantity / itemsPerPack;
+        // Multiply by the MRP per pack
+        return total + (numberOfPacks * Number(product.mrp) || 0);
+      },
       0
     );
   }, [productsWithCalculatedStock]);
@@ -641,6 +648,7 @@ export default function Home() {
             discount: Number(item.discount),
             itemTotal: Number(item.itemTotal),
             mrp: Number(item.mrp),
+            purchasedMrp: Number(item.purchasedMrp) || 0, // Ensure this field exists and is a number
           });
         }
       });
@@ -815,7 +823,7 @@ export default function Home() {
         <div className="flex justify-between items-center mb-8">
           <h2 className="text-3xl font-bold text-gray-800">Dashboard</h2>
           <div className="flex space-x-3">
-            <Link href="/productmaster" passHref>
+            {/* <Link href="/productmaster" passHref>
               <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
                 Product Master
               </Button>
@@ -824,12 +832,12 @@ export default function Home() {
               <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200">
                 New Purchase
               </Button>
-            </Link>
-            <Link href="/sales" passHref>
+            </Link> */}
+            {/* <Link href="/sales" passHref>
               <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200">
                 New Sale
               </Button>
-            </Link>
+            </Link> */}
             {/* New Link for Supplier Master */}
             <Link href="/supplier" passHref>
               <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors duration-200">
@@ -842,13 +850,6 @@ export default function Home() {
                 Customer Master
               </Button>
             </Link>
-            {/* Export Button */}
-            <Button
-              onClick={handleExportData}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-            >
-              <Download className="mr-2 h-4 w-4" /> Export Data
-            </Button>
             {/* Analytics Button */}
             <Button
                 onClick={() => setIsAnalyticsModalOpen(true)}
@@ -856,8 +857,14 @@ export default function Home() {
             >
                 <BarChartIcon className="mr-2 h-4 w-4" /> View Analytics
             </Button>
-            {/* Logout Button */}
-            <LogoutButton />
+            {/* Export Button */}
+            <Button
+              onClick={handleExportData}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+            >
+              <Download className="mr-2 h-4 w-4" /> Export Data
+            </Button>
+           
           </div>
         </div>
 

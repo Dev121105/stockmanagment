@@ -6,7 +6,7 @@ import { Button } from '../components/button';
 import { useRouter } from 'next/navigation';
 import Header from '../components/Header';
 import { toast } from 'sonner';
-import { Plus, Trash2, Eye, Edit, Save, Search, RefreshCcw, Printer, Share2, X, ArrowDownUp, ChevronLeft, ChevronRight } from 'lucide-react'; // Ensure all needed icons are imported
+import { Plus, Trash2, Eye, Edit, Save, Search, RefreshCcw, Printer, Share2, X, ArrowDownUp, ChevronLeft, ChevronRight, User, Phone, Mail, MapPin, Landmark } from 'lucide-react'; // Ensure all needed icons are imported
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -55,6 +55,8 @@ function parseDate(dateString) {
         let yearInt = parseInt(year, 10);
 
         // Adjust 2-digit year to 4-digit based on current century
+        // If year is, e.g., 90-99, assume 1900s. If 00-89, assume 2000s.
+        // This is a common heuristic, adjust 50 for the cutoff year for example.
         if (yearInt < 100) {
             yearInt = (yearInt > (currentYear % 100) + 20) ? 1900 + yearInt : 2000 + yearInt;
         }
@@ -63,7 +65,8 @@ function parseDate(dateString) {
             !isNaN(monthInt) && monthInt >= 1 && monthInt <= 12 &&
             !isNaN(yearInt) && yearInt >= 1900 && yearInt <= 2100
         ) {
-            return new Date(yearInt, monthInt, 0); // Day 0 of next month is last day of current month
+            // Day 0 of next month is the last day of the current month
+            return new Date(yearInt, monthInt, 0); 
         }
     }
 
@@ -76,6 +79,9 @@ const PurchasePage = () => {
     const [purchaseBills, setPurchaseBills] = useState([]);
     const [products, setProducts] = useState([]); // Master products list
     const [salesBills, setSalesBills] = useState([]); // For stock calculation
+    const [suppliers, setSuppliers] = useState([]); // All suppliers from master
+    const [supplierSuggestions, setSupplierSuggestions] = useState([]); // Filtered suggestions for supplier name
+    const [isSupplierListVisible, setIsSupplierListVisible] = useState(false); // Visibility of supplier suggestions
 
     const [billNumber, setBillNumber] = useState('');
     const [billDate, setBillDate] = useState(formatDate(new Date())); // Default to current date
@@ -250,6 +256,24 @@ const PurchasePage = () => {
         return () => unsubscribe();
     }, [isAuthReady, userId, appId]);
 
+    // Load Suppliers Data from Firestore for suggestions
+    useEffect(() => {
+        if (!isAuthReady || !userId) return;
+
+        console.log("PurchasePage Firestore: Setting up suppliers snapshot listener...");
+        const suppliersCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/suppliers`);
+        const unsubscribe = onSnapshot(suppliersCollectionRef, (snapshot) => {
+            const suppliersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setSuppliers(suppliersData);
+            console.log("PurchasePage Firestore: Suppliers data loaded for suggestions.");
+        }, (error) => {
+            console.error("PurchasePage Firestore Suppliers Error:", error);
+            toast.error("Error loading supplier data for suggestions.");
+        });
+
+        return () => unsubscribe();
+    }, [isAuthReady, userId, appId]);
+
 
     // Data update event listener (still useful for other pages to trigger re-renders)
     // This listener will now cause the Firestore onSnapshot listeners to re-evaluate,
@@ -264,11 +288,13 @@ const PurchasePage = () => {
         window.addEventListener("productsUpdated", handleDataUpdated);
         window.addEventListener("purchaseBillsUpdated", handleDataUpdated);
         window.addEventListener("salesUpdated", handleDataUpdated); // Corrected event name from salesBillsUpdated
+        window.addEventListener("suppliersUpdated", handleDataUpdated); // Listen for supplier updates
 
         return () => {
             window.removeEventListener("productsUpdated", handleDataUpdated);
             window.removeEventListener("purchaseBillsUpdated", handleDataUpdated);
             window.removeEventListener("salesUpdated", handleDataUpdated);
+            window.removeEventListener("suppliersUpdated", handleDataUpdated);
         };
     }, []); // Empty dependency array as it just sets up the listeners
 
@@ -394,7 +420,7 @@ const PurchasePage = () => {
             company: selectedProduct.company,
             discount: discount, // Discount for this purchased item
             taxRate: selectedProduct.taxRate || 0, // Assuming taxRate from master if not specified in purchase
-            totalItemAmount: (quantity * ptr * (1 - discount / 100)), // Calculate total for this item
+            totalItemAmount: (quantity / (selectedProduct.itemsPerPack || 1)) * ptr * (1 - discount / 100), // MODIFIED: Calculate total for this item based on packs
         };
 
         setCurrentPurchaseItems((prevItems) => [...prevItems, currentItem]);
@@ -435,17 +461,20 @@ const PurchasePage = () => {
 
             itemToUpdate[field] = parsedValue;
 
-            // Recalculate derived fields based on changes
-            if (field === 'quantity' || field === 'ptr' || field === 'discount') {
-                const quantity = Number(itemToUpdate.quantity) || 0;
-                const ptr = Number(itemToUpdate.ptr) || 0;
-                const discount = Number(itemToUpdate.discount) || 0;
-                itemToUpdate.totalItemAmount = (quantity * ptr * (1 - discount / 100));
+            // Define variables here, after itemToUpdate[field] has been updated
+            const quantity = Number(itemToUpdate.quantity) || 0;
+            const ptr = Number(itemToUpdate.ptr) || 0;
+            const discount = Number(itemToUpdate.discount) || 0;
+            const itemsPerPack = Number(itemToUpdate.itemsPerPack) || 1;
+
+            // Recalculate totalItemAmount if relevant fields change
+            if (field === 'quantity' || field === 'ptr' || field === 'discount' || field === 'itemsPerPack') {
+                itemToUpdate.totalItemAmount = (quantity / itemsPerPack) * ptr * (1 - discount / 100);
             }
 
-            // If quantity changes, recalculate packsPurchased
-            if (field === 'quantity') {
-                itemToUpdate.packsPurchased = quantity / (itemToUpdate.itemsPerPack || 1);
+            // Recalculate packsPurchased if quantity or itemsPerPack changes
+            if (field === 'quantity' || field === 'itemsPerPack') {
+                itemToUpdate.packsPurchased = quantity / itemsPerPack;
             }
 
             updatedItems[index] = itemToUpdate;
@@ -460,6 +489,27 @@ const PurchasePage = () => {
         setTotalAmount(calculatedTotal);
     }, [currentPurchaseItems]);
 
+    // --- Supplier Name Input with Suggestions ---
+    const handleSupplierNameChange = (e) => {
+        const value = e.target.value;
+        setSupplierName(value);
+        if (value.length > 0) {
+            const filtered = suppliers.filter(s =>
+                s.name.toLowerCase().includes(value.toLowerCase())
+            );
+            setSupplierSuggestions(filtered);
+            setIsSupplierListVisible(true);
+        } else {
+            setSupplierSuggestions([]);
+            setIsSupplierListVisible(false);
+        }
+    };
+
+    const handleSelectSupplier = (supplier) => {
+        setSupplierName(supplier.name);
+        setIsSupplierListVisible(false); // Hide suggestions after selection
+    };
+
     // --- Save/Update Bill Logic (Firestore Integration) ---
     const handleSaveBill = async () => {
         if (!userId) {
@@ -470,6 +520,31 @@ const PurchasePage = () => {
             toast.error("Please fill all bill details and add at least one item.");
             return;
         }
+
+        // Auto-save new supplier if not existing
+        const existingSupplier = suppliers.find(s => s.name.toLowerCase() === supplierName.trim().toLowerCase());
+        if (!existingSupplier) {
+            try {
+                const newSupplierData = {
+                    name: supplierName.trim(),
+                    contactPerson: '',
+                    phone: '',
+                    email: '',
+                    address: '',
+                    gstin: '',
+                };
+                const suppliersCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/suppliers`);
+                await addDoc(suppliersCollectionRef, newSupplierData);
+                toast.success(`New supplier "${supplierName}" added automatically.`);
+                // Dispatch event to update suppliers list on other pages (e.g., SupplierMasterPage)
+                window.dispatchEvent(new Event('suppliersUpdated'));
+            } catch (e) {
+                console.error("Error auto-saving new supplier: ", e);
+                toast.error(`Failed to auto-save new supplier "${supplierName}".`);
+                return; // Prevent bill from saving if supplier auto-save fails
+            }
+        }
+
 
         const billToSave = {
             billNumber: billNumber.trim(),
@@ -512,6 +587,8 @@ const PurchasePage = () => {
         setBillNumber('');
         setBillDate(formatDate(new Date()));
         setSupplierName('');
+        setSupplierSuggestions([]); // Clear suggestions
+        setIsSupplierListVisible(false); // Hide suggestions
         setCurrentPurchaseItems([]);
         setTotalAmount(0);
         setIsEditingBill(false);
@@ -708,16 +785,36 @@ const PurchasePage = () => {
                                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                             />
                         </div>
-                        <div>
+                        <div className="relative"> {/* Added relative for positioning suggestions */}
                             <label htmlFor="supplierName" className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
                             <input
                                 type="text"
                                 id="supplierName"
                                 value={supplierName}
-                                onChange={(e) => setSupplierName(e.target.value)}
+                                onChange={handleSupplierNameChange}
+                                onFocus={() => setIsSupplierListVisible(true)}
+                                onBlur={() => setTimeout(() => setIsSupplierListVisible(false), 200)}
                                 placeholder="Enter Supplier Name"
                                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                             />
+                            {isSupplierListVisible && supplierSuggestions.length > 0 && (
+                                <ul className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto mt-1">
+                                    {supplierSuggestions.map(supplier => (
+                                        <li
+                                            key={supplier.id}
+                                            onMouseDown={() => handleSelectSupplier(supplier)} // Use onMouseDown to trigger before onBlur
+                                            className="px-3 py-2 cursor-pointer hover:bg-gray-100 text-gray-800 text-sm"
+                                        >
+                                            {supplier.name}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {isSupplierListVisible && supplierSuggestions.length === 0 && supplierName.length > 0 && (
+                                <div className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto mt-1 px-3 py-2 text-sm text-gray-500">
+                                    No existing suppliers found. A new one will be created upon saving.
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1248,3 +1345,4 @@ const PurchasePage = () => {
 };
 
 export default PurchasePage;
+    
