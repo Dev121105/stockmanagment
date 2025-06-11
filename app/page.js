@@ -857,6 +857,11 @@ export default function Home() {
             >
                 <BarChartIcon className="mr-2 h-4 w-4" /> View Analytics
             </Button>
+             <Link href="/marginpage" passHref>
+              <Button className="inline-flex items-center mr-3 px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-amber-300 hover:bg-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors duration-200">
+                Margin Calculator
+              </Button>
+              
             {/* Export Button */}
             <Button
               onClick={handleExportData}
@@ -864,7 +869,8 @@ export default function Home() {
             >
               <Download className="mr-2 h-4 w-4" /> Export Data
             </Button>
-           
+            
+            </Link>
           </div>
         </div>
 
