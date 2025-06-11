@@ -447,11 +447,11 @@ const ProductMasterPage = () => {
                 </div>
 
                 {/* Display User ID (MANDATORY for multi-user apps) */}
-                {userId && (
+                {/* {userId && (
                     <div className="mb-4 p-3 bg-gray-200 rounded-md text-sm text-gray-700">
                         <span className="font-semibold">Current User ID:</span> {userId}
                     </div>
-                )}
+                )} */}
 
                 {/* Product Form */}
                 <div className="bg-white p-6 rounded-lg shadow-md mb-8 border border-gray-200">
