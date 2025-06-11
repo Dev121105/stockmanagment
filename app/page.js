@@ -820,9 +820,9 @@ export default function Home() {
     <div>
       <Header />
       <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 bg-gray-100 rounded-lg shadow-inner fade-in">
-        <div className="flex justify-between items-center mb-8">
-          <h2 className="text-3xl font-bold text-gray-800">Dashboard</h2>
-          <div className="flex space-x-3">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4 sm:mb-0">Dashboard</h2>
+          <div className="flex flex-wrap gap-3 mt-4 sm:mt-0 justify-center sm:justify-end">
             {/* <Link href="/productmaster" passHref>
               <Button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
                 Product Master
@@ -905,7 +905,7 @@ export default function Home() {
 
         {/* Product Stock List */}
         <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 mt-8">
-          <h3 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">
+          <h3 className="text-lg sm:text-xl font-semibold text-gray-700 mb-4 border-b pb-3 border-gray-200">
             Product Stock Overview
           </h3>
           <div className="overflow-x-auto border border-gray-200 rounded-md shadow-sm">
@@ -1038,7 +1038,7 @@ export default function Home() {
                             {" "}
                             <div className={`expandable-content ${expandedRow === product.id ? 'expanded' : ''}`}>
                               <div className="mb-6">
-                                <h4 className="text-md font-semibold text-gray-800 mb-2">
+                                <h4 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">
                                   Stock by Batch:
                                 </h4>
                                 <div className="overflow-x-auto border border-gray-300 rounded-md shadow-sm">
@@ -1102,7 +1102,7 @@ export default function Home() {
                               </div>
 
                               <div className="mb-6">
-                                <h4 className="text-md font-semibold text-gray-800 mb-2">
+                                <h4 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">
                                   Purchase History:
                                 </h4>
                                 <div className="overflow-x-auto border border-gray-300 rounded-md shadow-sm">
@@ -1239,7 +1239,7 @@ export default function Home() {
                               </div>
 
                               <div>
-                                <h4 className="text-md font-semibold text-gray-800 mb-2">
+                                <h4 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">
                                   Sales History:
                                 </h4>
                                 <div className="overflow-x-auto border border-gray-300 rounded-md shadow-sm">
@@ -1401,13 +1401,13 @@ export default function Home() {
         {/* Low Stock and Out of Stock Alerts */}
         {(lowStockProducts.length > 0 || outOfStockProducts.length > 0 || nearExpiryProducts.length > 0) && (
           <div className="mt-8 p-6 bg-yellow-50 border border-yellow-200 rounded-lg shadow-sm">
-            <h3 className="text-xl font-semibold text-yellow-800 mb-4 flex items-center">
+            <h3 className="text-base sm:text-lg font-semibold text-yellow-800 mb-4 flex items-center">
               <AlertTriangle className="h-6 w-6 mr-3 text-yellow-600" /> Stock
               Alerts
             </h3>
             {outOfStockProducts.length > 0 && (
               <div className="mb-4">
-                <h4 className="text-lg font-semibold text-red-700 mb-2">
+                <h4 className="text-base sm:text-lg font-semibold text-red-700 mb-2">
                   Out of Stock Products:
                 </h4>
                 <ul className="list-disc list-inside text-red-600">
@@ -1422,7 +1422,7 @@ export default function Home() {
             )}
             {lowStockProducts.length > 0 && (
               <div className="mb-4">
-                <h4 className="text-lg font-semibold text-yellow-700 mb-2">
+                <h4 className="text-base sm:text-lg font-semibold text-yellow-700 mb-2">
                   Low Stock Products:
                 </h4>
                 <ul className="list-disc list-inside text-yellow-600">
@@ -1436,7 +1436,7 @@ export default function Home() {
             )}
             {nearExpiryProducts.length > 0 && (
               <div>
-                <h4 className="text-lg font-semibold text-orange-700 mb-2">
+                <h4 className="text-base sm:text-lg font-semibold text-orange-700 mb-2">
                   Products Nearing Expiry (Next 2 Months):
                 </h4>
                 <ul className="list-disc list-inside text-orange-600">
@@ -1458,7 +1458,7 @@ export default function Home() {
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 fade-in-backdrop">
           <div className="bg-white p-6 rounded-lg shadow-xl w-11/12 md:w-3/4 lg:w-2/3 max-h-[90vh] overflow-y-auto animate-scale-in">
             <div className="flex justify-between items-center border-b pb-3 mb-4">
-              <h3 className="text-2xl font-bold text-gray-800">Business Analytics</h3>
+              <h3 className="text-lg sm:text-xl font-bold text-gray-800">Business Analytics</h3>
               <Button
                 onClick={() => setIsAnalyticsModalOpen(false)}
                 className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
@@ -1469,7 +1469,7 @@ export default function Home() {
 
             {/* Monthly Trends */}
             <div className="mb-6">
-              <h4 className="text-xl font-semibold text-gray-800 mb-3">Monthly Sales & Purchase Trends</h4>
+              <h4 className="text-base sm:text-lg font-semibold text-gray-800 mb-3">Monthly Sales & Purchase Trends</h4>
               {monthlyTrends.length > 0 ? (
                 <div className="h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1499,10 +1499,10 @@ export default function Home() {
 
             {/* Most Demanded Product */}
             <div className="mb-6">
-              <h4 className="text-xl font-semibold text-gray-800 mb-3">Most Demanded Product</h4>
+              <h4 className="text-base sm:text-lg font-semibold text-gray-800 mb-3">Most Demanded Product</h4>
               {mostSoldProduct ? (
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                  <p className="text-lg font-bold text-blue-800">{mostSoldProduct.productName}</p>
+                  <p className="text-base sm:text-lg font-bold text-blue-800">{mostSoldProduct.productName}</p>
                   <p className="text-sm text-blue-700">Total Units Sold: <span className="font-semibold">{mostSoldProduct.totalSoldQuantity}</span></p>
                   <p className="text-sm text-blue-700">Total Sales Value: <span className="font-semibold">₹{mostSoldProduct.totalSalesValue.toFixed(2)}</span></p>
                 </div>
@@ -1513,10 +1513,10 @@ export default function Home() {
 
             {/* Product-wise Sales & Purchase Overview (Table and Bar Chart) */}
             <div>
-              <h4 className="text-xl font-semibold text-gray-800 mb-3">Product-wise Sales & Purchase Overview</h4>
+              <h4 className="text-base sm:text-lg font-semibold text-gray-800 mb-3">Product-wise Sales & Purchase Overview</h4>
               {productAnalytics.length > 0 ? (
                 <>
-                  <div className="h-80 w-full mb-6">
+                  <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={productAnalytics.slice(0, 10)}
